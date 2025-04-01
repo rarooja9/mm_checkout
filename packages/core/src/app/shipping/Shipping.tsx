@@ -37,6 +37,8 @@ import ShippingForm from './ShippingForm';
 import ShippingHeader from './ShippingHeader';
 import { SingleShippingFormValues } from './SingleShippingForm';
 import StripeShipping from './stripeUPE/StripeShipping';
+import CustomShipping from './CustomShipping';
+
 
 export interface ShippingProps {
     isBillingSameAsShipping: boolean;
@@ -147,7 +149,7 @@ class Shipping extends Component<ShippingProps & WithCheckoutShippingProps, Ship
             cartHasPromotionalItems,
             ...shippingFormProps
         } = this.props;
-
+        var isCustomShipping= true;
         const {
             isInitializing,
             isMultiShippingUnavailableModalOpen,
@@ -157,6 +159,31 @@ class Shipping extends Component<ShippingProps & WithCheckoutShippingProps, Ship
             this.setState({ isMultiShippingUnavailableModalOpen: false });
             await this.handleMultiShippingModeSwitch();
         }
+
+        if (isCustomShipping) {
+            return <CustomShipping 
+              isBillingSameAsShipping={this.props.isBillingSameAsShipping}
+              cartHasChanged={this.props.cartHasChanged}
+              isMultiShippingMode={this.props.isMultiShippingMode}
+              step={this.props.step}
+              navigateNextStep={this.props.navigateNextStep}
+              onCreateAccount={this.props.onCreateAccount}
+              onReady={this.props.onReady}
+              onSignIn={this.props.onSignIn}
+              onToggleMultiShipping={this.props.onToggleMultiShipping} 
+              onUnhandledError={this.props.onUnhandledError}
+              cart={this.props.cart}
+              consignments={this.props.consignments}
+              customer={this.props.customer}
+              countries={this.props.countries}
+              shippingAddress={this.props.shippingAddress}
+              //updateShippingAddress={this.props.updateShippingAddress}
+              assignItem={this.props.assignItem}
+              getFields={this.props.getFields}
+              loadShippingOptions={this.props.loadShippingOptions}
+              deleteConsignments={this.props.deleteConsignments}
+            />;
+          }
 
         if (shouldRenderStripeForm && !customer.email && this.props.countries.length > 0) {
             return <StripeShipping
