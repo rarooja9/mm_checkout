@@ -114,6 +114,30 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
     const physicalItems = cart.lineItems.physicalItems;
 
+    const getOrderedPhysicalItems = () => {
+        // Make a copy of the physical items
+        const itemsToOrder = [...physicalItems];
+
+        // Sort the items based on the originalItemOrder array
+        return itemsToOrder.sort((a, b) => {
+            const aIndex = originalItemOrder.indexOf(a.id.toString());
+            const bIndex = originalItemOrder.indexOf(b.id.toString());
+
+            // If both items are in the original order, sort by their position
+            if (aIndex !== -1 && bIndex !== -1) {
+                return aIndex - bIndex;
+            }
+
+            // If only one item is in the original order, prioritize it
+            if (aIndex !== -1) return -1;
+            if (bIndex !== -1) return 1;
+
+            // If neither item is in the original order (shouldn't happen),
+            // preserve their current order
+            return 0;
+        });
+    };
+
     // First initialization - only remove consignments that have multiple items
     useEffect(() => {
         const initConsignments = async () => {
@@ -121,6 +145,10 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 setIsLoading(true);
 
                 try {
+                    const itemOrder = physicalItems.map(item => item.id.toString());
+                    setOriginalItemOrder(itemOrder);
+
+
                     const checkout = getCheckout();
                     if (!checkout) {
                         return;
@@ -837,202 +865,203 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
-// Add this function to split line items by quantity
-const handleSplitLineItem = async (lineItemId: string | number, quantity: number) => {
-    if (quantity <= 1) {
-        return; // No need to split if quantity is 1
-    }
 
-    setIsLoading(true);
+    const handleSplitLineItem = async (lineItemId: string | number, quantity: number) => {
+        if (quantity <= 1) return;
 
-    try {
-        const checkout = getCheckout();
-        if (!checkout) {
-            return;
-        }
+        setIsLoading(true);
+        try {
+            const checkout = getCheckout();
+            if (!checkout) {
+                throw new Error('Checkout not available');
+            }
 
-        // Get the current cart line item
-        const originalItem = physicalItems.find(item => item.id === lineItemId);
-        if (!originalItem) {
-            throw new Error('Item not found');
-        }
+            const currentItem = physicalItems.find(item => item.id === lineItemId);
+            if (!currentItem) {
+                throw new Error('Item not found');
+            }
 
-        // Generate gift messages for each split item
-        const giftMessages = [];
-        for (let i = 0; i < quantity; i++) {
-            giftMessages.push(`Recipient #${i+1}`);
-        }
+            // Prepare base address for split items
+            const baseAddress = {
+                firstName: '',
+                lastName: '',
+                address1: '',
+                address2: '',
+                city: 'Los Angeles',
+                stateOrProvince: 'California',
+                stateOrProvinceCode: 'CA',
+                countryCode: 'US',
+                postalCode: '90017',
+                phone: ''
+            };
 
-        // Call the custom middleware endpoint to split the item
-        const response = await fetch('https://bc-middleware-mm.onrender.com/cart/update', {
-            method: 'POST',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-                action: 'split',
-                cartId: checkout.cart.id,
-                items: [
-                    {
-                        id: lineItemId,
-                        quantity: quantity,
-                        productId: originalItem.productId,
-                        variantId: originalItem.variantId,
-                        giftMessages: giftMessages
-                    }
-                ]
-            })
-        });
+            // Create consignments for each split item
+            const splitConsignments = Array.from({ length: quantity }, () => ({
+                address: { ...baseAddress },
+                lineItems: [{
+                    itemId: lineItemId.toString(),
+                    quantity: 1
+                }]
+            }));
 
-        if (!response.ok) {
-            const errorData = await response.json();
-            throw new Error(errorData.error || 'Failed to split item');
-        }
+            // Make API call to create split consignments
+            const options = {
+                method: 'POST',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(splitConsignments)
+            };
 
-        // Reload checkout to get fresh cart data
-        await loadCheckout();
-
-        // Get the updated physical items
-        const updatedCheckout = getCheckout();
-        if (!updatedCheckout) {
-            throw new Error('Failed to get updated checkout');
-        }
-
-        const updatedPhysicalItems = updatedCheckout.cart.lineItems.physicalItems;
-
-        // Create new consignments array based on updated cart
-        const updatedConsignments = updatedCheckout.consignments || [];
-
-        // Create new item consignments
-        const newItemConsignments: ConsignmentWithItem[] = [];
-
-        // Process each physical item
-        updatedPhysicalItems.forEach(item => {
-            // Find matching consignment
-            const itemConsignment = updatedConsignments.find(consignment =>
-                consignment.lineItemIds.includes(item.id.toString())
+            const response = await fetch(
+                `/api/storefront/checkouts/${checkout.id}/consignments?include=consignments.availableShippingOptions`,
+                options
             );
 
-            newItemConsignments.push({
-                id: itemConsignment?.id,
-                lineItemId: item.id as string,
-                shippingAddress: itemConsignment?.shippingAddress || null,
-                selectedShippingOption: itemConsignment?.selectedShippingOption || null,
-                availableShippingOptions: itemConsignment?.availableShippingOptions || [],
+            if (!response.ok) {
+                throw new Error('Failed to split line item');
+            }
+
+            const result = await response.json();
+            const updatedConsignments = result.consignments || [];
+
+            // Reload checkout to sync state
+            await loadCheckout();
+
+            // Update local state to reflect split items
+            const newItemConsignments = updatedConsignments.map((consignment: any) => ({
+                id: consignment.id,
+                lineItemId: consignment.lineItemIds[0],
+                shippingAddress: null,
+                selectedShippingOption: null,
+                availableShippingOptions: consignment.availableShippingOptions || [],
+            }));
+
+            // Update configured items state
+            const newConfiguredItems = { ...configuredItems };
+            newItemConsignments.forEach((consignment: { lineItemId: string | number; }) => {
+                newConfiguredItems[consignment.lineItemId] = false;
             });
-        });
 
-        // Update item consignments state
-        setItemConsignments(newItemConsignments);
+            // Update state
+            setItemConsignments(prevConsignments => [
+                ...prevConsignments.filter(c => c.lineItemId !== lineItemId),
+                ...newItemConsignments
+            ]);
+            setConfiguredItems(newConfiguredItems);
 
-        // Reset configured items (all items now need to be configured)
-        const newConfiguredItems: { [key: string]: boolean } = {};
-        updatedPhysicalItems.forEach(item => {
-            const itemConsignment = updatedConsignments.find(consignment =>
-                consignment.lineItemIds.includes(item.id.toString())
-            );
+            // Maintain editing context
+            const currentIndex = physicalItems.findIndex(item => item.id === lineItemId);
+            setCurrentItemIndex(currentIndex);
+            setIsEditing(true);
 
-            newConfiguredItems[item.id] = Boolean(
-                itemConsignment?.shippingAddress && itemConsignment?.selectedShippingOption
-            );
-        });
+            // Reset selections
+            setSelectedAddress(null);
+            setSelectedShippingOption(null);
 
-        setConfiguredItems(newConfiguredItems);
-
-        // Set current item to first unconfigured item
-        const firstUnconfiguredIndex = updatedPhysicalItems.findIndex(
-            item => !newConfiguredItems[item.id]
-        );
-
-        setCurrentItemIndex(firstUnconfiguredIndex >= 0 ? firstUnconfiguredIndex : 0);
-
-        // Update original item order
-        setOriginalItemOrder(updatedPhysicalItems.map(item => item.id.toString()));
-
-        // Force reload to update UI
-        await refreshCheckoutTotals();
-
-    } catch (err) {
-        if (err instanceof Error) {
-            setError(`Error splitting item: ${err.message}`);
-            onUnhandledError(err);
+            // Refresh checkout totals
+            await refreshCheckoutTotals();
+        } catch (err) {
+            if (err instanceof Error) {
+                setError(`Error splitting line item: ${err.message}`);
+                onUnhandledError(err);
+            }
+        } finally {
+            setIsLoading(false);
         }
-    } finally {
-        setIsLoading(false);
-    }
-};
+    };
 
     const handleEditConsignment = async (index: number) => {
         if (isEditing) {
             return;
         }
 
+        setIsLoading(true);
         setIsEditing(true);
         setCurrentItemIndex(index);
 
-        // Get the current item ID
-        const itemId = physicalItems[index]?.id;
+        try {
+            // Get the current item ID
+            const itemId = physicalItems[index]?.id;
+            const checkout = getCheckout();
+           
+            if (!checkout) {
+                throw new Error('Checkout not available');
+            }
 
-        // Load the selected values for this consignment
-        const consignment = itemConsignments.find(c => c.lineItemId === itemId);
+            // Fetch detailed checkout data
+            const options = {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            };
 
-        if (consignment) {
-            // Initially set both to null - we'll only set them if valid
+            const response = await fetch(
+                `/api/storefront/checkouts/${checkout.id}?include=cart.lineItems.physicalItems.options,consignments.availableShippingOptions`,
+                options
+            );
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch checkout details');
+            }
+
+            const checkoutData = await response.json();
+
+            // Find the specific consignment for this item
+            const relevantConsignment = checkoutData.consignments?.find((c: any) =>
+                c.lineItemIds.includes(itemId.toString())
+            );
+
+            // Reset selections
             setSelectedAddress(null);
             setSelectedShippingOption(null);
 
-            // Refresh available shipping options for this consignment
-            setIsLoading(true);
-            try {
-                // Sync with checkout to make sure we have the latest data
-                await loadCheckout();
+            if (relevantConsignment) {
+                // Update local item consignments
+                const updatedItemConsignments = [...itemConsignments];
+                const consignmentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === itemId);
 
-                // Get the updated consignment from the checkout state
-                const updatedConsignments = getCheckout()?.consignments || [];
-                const updatedConsignment = updatedConsignments.find(c =>
-                    c.lineItemIds.includes(itemId.toString())
-                );
+                if (consignmentIndex >= 0) {
+                    updatedItemConsignments[consignmentIndex] = {
+                        ...updatedItemConsignments[consignmentIndex],
+                        id: relevantConsignment.id,
+                        availableShippingOptions: relevantConsignment.availableShippingOptions || [],
+                        selectedShippingOption: relevantConsignment.selectedShippingOption,
+                        shippingAddress: relevantConsignment.shippingAddress
+                    };
 
-                if (updatedConsignment) {
-                    // Update our local item consignment with updated shipping options
-                    const updatedItemConsignments = [...itemConsignments];
-                    const consignmentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === itemId);
+                    setItemConsignments(updatedItemConsignments);
 
-                    if (consignmentIndex >= 0) {
-                        updatedItemConsignments[consignmentIndex] = {
-                            ...updatedItemConsignments[consignmentIndex],
-                            id: updatedConsignment.id,
-                            availableShippingOptions: updatedConsignment.availableShippingOptions || [],
-                            selectedShippingOption: updatedConsignment.selectedShippingOption
-                        };
+                    // Check if the consignment has both shipping address and shipping option
+                    const hasValidConsignment =
+                        relevantConsignment.shippingAddress &&
+                        relevantConsignment.selectedShippingOption;
 
-                        setItemConsignments(updatedItemConsignments);
-
-                        // Only set the address if shipping options are available
-                        const hasShippingOptions =
-                            updatedConsignment.availableShippingOptions &&
-                            updatedConsignment.availableShippingOptions.length > 0;
-
-                        if (hasShippingOptions) {
-                            setSelectedAddress(updatedConsignment.shippingAddress);
-                            setSelectedShippingOption(updatedConsignment.selectedShippingOption);
-                        }
+                    if (hasValidConsignment) {
+                        // Directly set the existing address and shipping option
+                       setSelectedAddress(relevantConsignment.shippingAddress);
+                       setSelectedShippingOption(relevantConsignment.selectedShippingOption);
                     }
                 }
-            } catch (err) {
-                if (err instanceof Error) {
-                    setError(`Error loading shipping options: ${err.message}`);
-                }
-            } finally {
-                setIsLoading(false);
+
+                // Mark this item as not configured to allow editing
+                const updatedConfiguredItems = { ...configuredItems };
+                delete updatedConfiguredItems[itemId];
+                setConfiguredItems(updatedConfiguredItems);
             }
 
-            // Important: Mark this item as NOT configured so it shows in edit mode
-            const updatedConfiguredItems = { ...configuredItems };
-            delete updatedConfiguredItems[itemId];
-            setConfiguredItems(updatedConfiguredItems);
+            // Refresh checkout totals
             await refreshCheckoutTotals();
+        } catch (err) {
+            if (err instanceof Error) {
+                setError(`Error editing consignment: ${err.message}`);
+                onUnhandledError(err);
+            }
+        } finally {
+            setIsLoading(false);
         }
     };
 
@@ -1083,6 +1112,8 @@ const handleSplitLineItem = async (lineItemId: string | number, quantity: number
             <div
                 key={item.id}
                 className={`tt-custom-item-wrapper ${isBeingEdited ? 'tt-custom-item-editing' : ''}`}
+
+                data-item-id={item.id}
             >
                 {/* Item Image and Basic Details - Always Visible */}
                 <div className="tt-custom-item-base-info">
@@ -1157,11 +1188,11 @@ const handleSplitLineItem = async (lineItemId: string | number, quantity: number
                                                 <input
                                                     type="radio"
                                                     name="shippingOption"
-                                                    id={option.id}
+                                                    id={`${item.id}-${option.id}`}
                                                     checked={selectedShippingOption?.id === option.id}
                                                     onChange={() => handleShippingOptionSelect(option)}
                                                 />
-                                                <label htmlFor={option.id}>
+                                                <label htmlFor={`${item.id}-${option.id}`}>
                                                     <div className="tt-custom-option-description">{option.description}</div>
                                                     <div className="tt-custom-option-cost">${option.cost.toFixed(2)}</div>
                                                     {option.transitTime && <div className="tt-custom-option-transit">{option.transitTime}</div>}
@@ -1187,7 +1218,7 @@ const handleSplitLineItem = async (lineItemId: string | number, quantity: number
                         {/* Continue Button */}
                         <div className="form-actions">
                             <Button
-                                id="checkout-shipping-continue"
+                                id={`checkout-shipping-continue-${item.id}`}
                                 onClick={handleContinue}
                                 disabled={
                                     isLoading ||
@@ -1250,13 +1281,6 @@ const handleSplitLineItem = async (lineItemId: string | number, quantity: number
     };
 
 
-    // Sort physical items based on original order to maintain consistency
-    const orderedPhysicalItems = [...physicalItems].sort((a, b) => {
-        const aIndex = originalItemOrder.indexOf(a.id.toString());
-        const bIndex = originalItemOrder.indexOf(b.id.toString());
-        return aIndex - bIndex;
-    });
-
     return (
         <div className="checkout-form">
             <LoadingOverlay isLoading={isLoading}>
@@ -1290,7 +1314,7 @@ const handleSplitLineItem = async (lineItemId: string | number, quantity: number
 
                     {/* Render all items in original order */}
                     <div className="tt-custom-items-container">
-                        {orderedPhysicalItems.map((item, index) => renderItem(item, index))}
+                        {getOrderedPhysicalItems().map((item, index) => renderItem(item, index))}
                     </div>
 
                     {/* Final Continue Button */}
