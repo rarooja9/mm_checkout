@@ -13,6 +13,13 @@ import {
     Address
 } from '@bigcommerce/checkout-sdk';
 
+import {
+    saveConsignmentToSession,
+    updateStoredConsignment,
+    removeStoredConsignment,
+    findStoredConsignmentByLineItemId
+} from './consignment-persistence';
+
 import { AddressFormModal, AddressFormValues, AddressSelect, AddressType, mapAddressFromFormValues, isValidAddress } from "../address";
 import { ErrorModal } from '../common/error';
 //import getRecommendedShippingOption from './getRecommendedShippingOption';
@@ -138,6 +145,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         });
     };
 
+    useEffect(() => {
+        if (error) {
+            const errorTimeout = setTimeout(() => {
+                setError(null);
+            }, 7000); // 7 seconds
+
+            // Cleanup function to clear the timeout if component unmounts
+            return () => clearTimeout(errorTimeout);
+        }
+    }, [error]);
+
     // First initialization - only remove consignments that have multiple items
     useEffect(() => {
         const initConsignments = async () => {
@@ -154,6 +172,40 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         return;
                     }
                     const currentConsignments = consignments || [];
+
+                    for (const item of physicalItems) {
+                        // Check if this item already has a consignment
+                        const existingConsignment = currentConsignments.find(c =>
+                            c.lineItemIds.length === 1 &&
+                            c.lineItemIds[0] === item.id.toString() &&
+                            c.lineItemIds.length === 1
+                        );
+
+
+                        // 1. Consignment exists but has no shipping option or address
+                        if (
+                            (existingConsignment &&
+                                (!existingConsignment.selectedShippingOption ||
+                                    !existingConsignment.shippingAddress ||
+                                    Object.keys(existingConsignment.shippingAddress).length === 0)
+                            )
+                        ) {
+                            const storedConsignment = findStoredConsignmentByLineItemId(
+                                item.id,
+                                1
+                            );
+                            // If stored consignment exists, restore it
+                            if (storedConsignment?.selectedShippingOptionId) {
+                                try {
+                                    await restoreConsignment(storedConsignment);
+                                } catch (restoreError) {
+                                    console.error(`Error restoring consignment for item ${item.id}:`, restoreError);
+                                }
+                            }
+                        }
+                    }
+
+
                     const consignmentsToRemove = currentConsignments.filter(
                         consignment => !consignment.selectedShippingOption
                     );
@@ -169,6 +221,10 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             };
 
                             await fetch(`/api/storefront/checkouts/${checkout.id}/consignments/${consignment.id}`, options);
+
+                            if (consignment.id) {
+                                removeStoredConsignment(consignment.id);
+                            }
                         }
 
                         // After removing consignments, reload checkout
@@ -316,6 +372,12 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         // Synchronize with checkout state
                         await loadCheckout();
                     }
+
+
+
+                    // Reload checkout after potential restorations
+                    await loadCheckout();
+
                 } catch (err) {
                     if (err instanceof Error) {
                         setError(`Error initializing: ${err.message}`);
@@ -573,6 +635,13 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                 // Update our local item consignments with the updated data
                 if (updatedConsignment) {
+                    updateStoredConsignment(
+                        updatedConsignment.id,
+                        getCurrentItem().id,
+                        getCurrentItem().quantity,
+                        updatedConsignment.shippingAddress,
+                        option.id
+                    );
                     const newItemConsignments = [...itemConsignments];
                     const currentIndex = newItemConsignments.findIndex(c => c.lineItemId === getCurrentItem()?.id);
 
@@ -650,6 +719,15 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                 // Update our item consignments list
                 if (newConsignment) {
+
+                    saveConsignmentToSession(
+                        newConsignment.id,
+                        currentItem.id,
+                        currentItem.quantity,
+                        address,
+                        newConsignment.selectedShippingOption?.id || ''
+                    );
+
                     const updatedItemConsignments = [...itemConsignments];
                     const currentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === currentItem.id);
 
@@ -926,9 +1004,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             const result = await response.json();
             const updatedConsignments = result.consignments || [];
 
-            // Reload checkout to sync state
-            await loadCheckout();
-
+            const currentConsignments = updatedConsignments || [];
             // Update local state to reflect split items
             const newItemConsignments = updatedConsignments.map((consignment: any) => ({
                 id: consignment.id,
@@ -938,17 +1014,174 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 availableShippingOptions: consignment.availableShippingOptions || [],
             }));
 
-            // Update configured items state
-            const newConfiguredItems = { ...configuredItems };
-            newItemConsignments.forEach((consignment: { lineItemId: string | number; }) => {
-                newConfiguredItems[consignment.lineItemId] = false;
+
+
+            for (const item of newItemConsignments) {
+                // Check if this item already has a consignment
+                const existingConsignment = currentConsignments.find((c: { lineItemIds: string | any[]; }) =>
+                    c.lineItemIds.length === 1 &&
+                    c.lineItemIds[0] === item.lineItemId.toString() &&
+                    c.lineItemIds.length === 1
+                );
+
+                // 1. Consignment exists but has no shipping option or address
+                if (
+                    (existingConsignment &&
+                        (!existingConsignment.selectedShippingOption ||
+                            !existingConsignment.shippingAddress ||
+                            Object.keys(existingConsignment.shippingAddress).length === 0)
+                    )
+                ) {
+                    const storedConsignment = findStoredConsignmentByLineItemId(
+                        item.lineItemId,
+                        1  // Each split item has quantity 1
+                    );
+                    console.log('storedConsignment', storedConsignment)
+                    // If stored consignment exists, restore it
+                    if (storedConsignment?.selectedShippingOptionId) {
+                        try {
+                            await restoreConsignment(storedConsignment);
+                        } catch (restoreError) {
+                            console.error(`Error restoring consignment for item ${item.lineItemId}:`, restoreError);
+                        }
+                    }
+                }
+            }
+
+
+            const checkoutOptions = {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Cache-Control': 'no-cache, no-store'
+                }
+            };
+
+
+            const checkoutResponse = await fetch(`/api/storefront/checkouts/${checkout.id}?include=cart.lineItems.physicalItems.options,consignments.availableShippingOptions`, checkoutOptions);
+
+            const checkoutResult = await checkoutResponse.json();
+            const newConsignments = checkoutResult.consignments || [];
+
+            // Reload checkout to sync state and update UI
+            await loadCheckout();
+
+
+            // Update or create stored consignments for each new consignment
+            newConsignments.forEach((consignment: any) => {
+                // Save or update consignment in session storage
+                saveConsignmentToSession(
+                    consignment.id,
+                    consignment.lineItemIds[0],
+                    1,
+                    consignment.shippingAddress || baseAddress,
+                    consignment.selectedShippingOption?.id || ''
+                );
             });
 
-            // Update state
-            setItemConsignments(prevConsignments => [
-                ...prevConsignments.filter(c => c.lineItemId !== lineItemId),
-                ...newItemConsignments
-            ]);
+            // // Update itemConsignments with the restored data
+            // const updatedItemConsignments = itemConsignments.map(consignment => {
+            //     // Find the corresponding consignment in updatedConsignments
+            //     const matchingConsignment = newConsignments.find(
+            //         (c: { lineItemIds: (string | number)[]; }) => c.lineItemIds[0] === consignment.lineItemId
+            //     );
+
+            //     if (matchingConsignment) {
+            //         return {
+            //             ...consignment,
+            //             id: matchingConsignment.id,
+            //             shippingAddress: matchingConsignment.shippingAddress,
+            //             selectedShippingOption: matchingConsignment.selectedShippingOption,
+            //             availableShippingOptions: matchingConsignment.availableShippingOptions || [],
+            //         };
+            //     }
+
+            //     return consignment;
+            // });
+
+            // // Update state
+            // setItemConsignments(updatedItemConsignments);
+
+            // setItemConsignments(prevConsignments => {
+            //     // Filter out existing consignments for the split item
+            //     const filteredConsignments = prevConsignments.filter(
+            //         c => c.lineItemId !== lineItemId
+            //     );
+
+            //     // Add new unique consignments
+            //     return [
+            //         ...filteredConsignments,
+            //         ...newItemConsignments
+            //     ];
+            // });
+
+            const mergeConsignments = (existingConsignments: ConsignmentWithItem[], newConsignments: any[]) => {
+                // Create a map to help with deduplication and prioritization
+                const consignmentMap = new Map<string | number, ConsignmentWithItem>();
+
+                // First, add existing consignments
+                existingConsignments.forEach(consignment => {
+                    if (!consignmentMap.has(consignment.lineItemId)) {
+                        consignmentMap.set(consignment.lineItemId, consignment);
+                    }
+                });
+
+                // Add or update with new consignments
+                newConsignments.forEach(newConsignment => {
+                    const lineItemId = newConsignment.lineItemIds[0];
+                    const existingConsignment = consignmentMap.get(lineItemId);
+
+                    const newConsignmentObj = {
+                        id: newConsignment.id,
+                        lineItemId,
+                        shippingAddress: newConsignment.shippingAddress,
+                        selectedShippingOption: newConsignment.selectedShippingOption,
+                        availableShippingOptions: newConsignment.availableShippingOptions || [],
+                    };
+
+                    // Prioritize consignments with complete shipping info
+                    if (!existingConsignment ||
+                        (newConsignmentObj.shippingAddress && newConsignmentObj.selectedShippingOption)) {
+                        consignmentMap.set(lineItemId, newConsignmentObj);
+                    }
+                });
+
+                return Array.from(consignmentMap.values());
+            };
+
+            // Replace all setItemConsignments calls with this merged version
+            setItemConsignments(prevConsignments =>
+                mergeConsignments(prevConsignments, newConsignments)
+            );
+
+            // Update configured items state
+            // const newConfiguredItems = { ...configuredItems };
+            // newItemConsignments.forEach((consignment: { lineItemId: string | number; }) => {
+            //     newConfiguredItems[consignment.lineItemId] = false;
+            // });
+            const newConfiguredItems = { ...configuredItems };
+           
+            itemConsignments.forEach((consignment: {
+                lineItemId: string | number;
+                shippingAddress?: any;
+                selectedShippingOption?: any;
+            }) => {
+                // Only mark as false if it's not fully configured
+                // If it has both shipping address and shipping option, keep it as true if it was already true
+               
+                const isFullyConfigured =
+                    consignment.shippingAddress &&
+                    Object.keys(consignment.shippingAddress).length > 0 &&
+                    consignment.selectedShippingOption;
+               
+               
+                // Only update if not fully configured or if it wasn't previously configured
+                if (!isFullyConfigured || !newConfiguredItems[consignment.lineItemId]) {
+                    newConfiguredItems[consignment.lineItemId] = false;
+                }
+            });
+
+            
             setConfiguredItems(newConfiguredItems);
 
             // Maintain editing context
@@ -972,8 +1205,65 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
+    const restoreConsignment = async (storedConsignment: any) => {
+        const checkout = getCheckout();
+        if (!checkout) {
+            throw new Error('Checkout not available');
+        }
+
+        try {
+            // Check if a consignment already exists for this line item
+            const existingConsignments = checkout.consignments || [];
+            const existingConsignment = existingConsignments.find(c =>
+                c.lineItemIds.includes(storedConsignment.lineItemId.toString())
+            );
+
+            let response;
+            if (existingConsignment) {
+                const consignmentPayload = {
+                    shippingOptionId: storedConsignment.selectedShippingOptionId
+                };
+                // Update existing consignment
+                const options = {
+                    method: 'PUT',
+                    headers: {
+                        'Accept': 'application/json',
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(consignmentPayload)
+                };
+
+                response = await fetch(
+                    `/api/storefront/checkouts/${checkout.id}/consignments/${existingConsignment.id}?include=consignments.availableShippingOptions`,
+                    options
+                );
+
+                if (!response.ok) {
+                    const errorData = await response.json();
+                    throw new Error(errorData.title || 'Failed to restore consignment');
+                }
+
+                // Reload checkout to sync state
+                await loadCheckout();
+
+                return await response.json();
+            }
+        } catch (error) {
+            console.error('Error restoring consignment:', error);
+            throw error;
+        }
+    };
+
     const handleEditConsignment = async (index: number) => {
-        if (isEditing) {
+        // Check if any item is currently being edited
+        console.log('configuredItems', configuredItems)
+        const isAnyItemEditing = Object.values(configuredItems).some(
+            (isConfigured) => isConfigured === false
+        );
+        console.log('isAnyItemEditing', isAnyItemEditing)
+        // If another item is already being edited, prevent editing
+        if (isAnyItemEditing) {
+            setError('Please complete editing the current item first');
             return;
         }
 
@@ -985,7 +1275,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             // Get the current item ID
             const itemId = physicalItems[index]?.id;
             const checkout = getCheckout();
-           
+
             if (!checkout) {
                 throw new Error('Checkout not available');
             }
@@ -1020,6 +1310,14 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             setSelectedShippingOption(null);
 
             if (relevantConsignment) {
+                updateStoredConsignment(
+                    relevantConsignment.id,
+                    itemId,
+                    physicalItems[index].quantity,
+                    relevantConsignment.shippingAddress,
+                    relevantConsignment.selectedShippingOption?.id || ''
+                );
+
                 // Update local item consignments
                 const updatedItemConsignments = [...itemConsignments];
                 const consignmentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === itemId);
@@ -1042,13 +1340,22 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                     if (hasValidConsignment) {
                         // Directly set the existing address and shipping option
-                       setSelectedAddress(relevantConsignment.shippingAddress);
-                       setSelectedShippingOption(relevantConsignment.selectedShippingOption);
+                        setSelectedAddress(relevantConsignment.shippingAddress);
+                        setSelectedShippingOption(relevantConsignment.selectedShippingOption);
                     }
                 }
 
                 // Mark this item as not configured to allow editing
                 const updatedConfiguredItems = { ...configuredItems };
+
+                Object.keys(updatedConfiguredItems).forEach(key => {
+                    if (key !== itemId.toString()) {
+                        updatedConfiguredItems[key] = true;
+                    } else {
+                        updatedConfiguredItems[key] = false;
+                    }
+                });
+
                 delete updatedConfiguredItems[itemId];
                 setConfiguredItems(updatedConfiguredItems);
             }
@@ -1059,6 +1366,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             if (err instanceof Error) {
                 setError(`Error editing consignment: ${err.message}`);
                 onUnhandledError(err);
+
+                setIsEditing(false);
+                setCurrentItemIndex(-1);
             }
         } finally {
             setIsLoading(false);
@@ -1107,7 +1417,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             !isConfigured &&
             item.quantity > 1 &&
             (!consignment || !consignment.id);
-
         return (
             <div
                 key={item.id}
@@ -1269,7 +1578,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                 onClick={() => handleEditConsignment(index)}
                                 variant={ButtonVariant.Secondary}
                                 className="optimizedCheckout-buttonSecondary"
-                                disabled={isEditing}
+                                disabled={
+                                    isEditing &&
+                                    currentItemIndex !== index &&
+                                    !configuredItems[physicalItems[index].id]
+                                }
                             >
                                 Edit
                             </Button>
