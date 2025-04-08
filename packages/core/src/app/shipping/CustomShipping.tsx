@@ -21,6 +21,7 @@ import {
 } from './consignment-persistence';
 
 import { AddressFormModal, AddressFormValues, AddressSelect, AddressType, mapAddressFromFormValues, isValidAddress } from "../address";
+import GiftMessageModal from "./GiftMessageModal"
 import { ErrorModal } from '../common/error';
 //import getRecommendedShippingOption from './getRecommendedShippingOption';
 
@@ -37,6 +38,11 @@ export interface LineItem {
     name: string;
     imageUrl?: string;
     quantity: number;
+    giftWrapping?: {
+        name?: string;
+        message?: string;
+        amount?: number;
+    };
 }
 
 export interface ConsignmentWithItem {
@@ -119,6 +125,10 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     // Add originalItemOrder state to maintain the display order
     const [originalItemOrder, setOriginalItemOrder] = useState<string[]>([]);
 
+    const [isEditGiftMessageModalOpen, setIsEditGiftMessageModalOpen] = useState(false);
+    const [currentGiftMessageItemId, setCurrentGiftMessageItemId] = useState<string | number | null>(null);
+    const [editedGiftMessage, setEditedGiftMessage] = useState('');
+
     const physicalItems = cart.lineItems.physicalItems;
 
     const getOrderedPhysicalItems = () => {
@@ -171,9 +181,15 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     if (!checkout) {
                         return;
                     }
-                    const currentConsignments = consignments || [];
+                    let currentConsignments = consignments || [];
 
                     for (const item of physicalItems) {
+                        const physicalItem = physicalItems.find(
+                            physItem => physItem.id.toString() === item.id.toString()
+                        );
+
+                        // Get the quantity dynamically
+                        const itemQuantity = physicalItem ? physicalItem.quantity : 1;
                         // Check if this item already has a consignment
                         const existingConsignment = currentConsignments.find(c =>
                             c.lineItemIds.length === 1 &&
@@ -183,17 +199,12 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
 
                         // 1. Consignment exists but has no shipping option or address
-                        if (
-                            (existingConsignment &&
-                                (!existingConsignment.selectedShippingOption ||
-                                    !existingConsignment.shippingAddress ||
-                                    Object.keys(existingConsignment.shippingAddress).length === 0)
-                            )
-                        ) {
+                        if (existingConsignment && !existingConsignment.selectedShippingOption) {
                             const storedConsignment = findStoredConsignmentByLineItemId(
                                 item.id,
-                                1
+                                itemQuantity
                             );
+
                             // If stored consignment exists, restore it
                             if (storedConsignment?.selectedShippingOptionId) {
                                 try {
@@ -204,7 +215,22 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             }
                         }
                     }
+                    const checkoutOptions = {
+                        method: 'GET',
+                        headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
+                    };
 
+                    const response = await fetch(
+                        `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions`,
+                        checkoutOptions
+                    );
+
+                    if (!response.ok) {
+                        throw new Error('Failed to split line item');
+                    }
+
+                    const result = await response.json();
+                    currentConsignments = result.consignments || [];
 
                     const consignmentsToRemove = currentConsignments.filter(
                         consignment => !consignment.selectedShippingOption
@@ -281,7 +307,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
 
                         // Check if there are any consignments with multiple items that need to be split
-                        const consignmentsToSplit = consignments.filter(
+                        const consignmentsToSplit = currentConsignments.filter(
                             consignment => consignment.lineItemIds && consignment.lineItemIds.length > 1
                         );
 
@@ -312,7 +338,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             const configuredItemsMap: { [key: string]: boolean } = {};
 
                             // Process existing consignments
-                            for (const consignment of consignments) {
+                            for (const consignment of currentConsignments) {
                                 for (const lineItemId of consignment.lineItemIds) {
                                     mappedConsignments.push({
                                         id: consignment.id,
@@ -1017,6 +1043,12 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
 
             for (const item of newItemConsignments) {
+                const physicalItem = physicalItems.find(
+                    physItem => physItem.id.toString() === item.lineItemId.toString()
+                );
+
+                // Get the quantity dynamically
+                const itemQuantity = physicalItem ? physicalItem.quantity : 1;
                 // Check if this item already has a consignment
                 const existingConsignment = currentConsignments.find((c: { lineItemIds: string | any[]; }) =>
                     c.lineItemIds.length === 1 &&
@@ -1034,7 +1066,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 ) {
                     const storedConsignment = findStoredConsignmentByLineItemId(
                         item.lineItemId,
-                        1  // Each split item has quantity 1
+                        itemQuantity
                     );
                     console.log('storedConsignment', storedConsignment)
                     // If stored consignment exists, restore it
@@ -1069,11 +1101,18 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
             // Update or create stored consignments for each new consignment
             newConsignments.forEach((consignment: any) => {
+
+                const physicalItem = physicalItems.find(
+                    physItem => physItem.id.toString() === consignment.lineItemIds[0].toString()
+                );
+
+                // Get the quantity dynamically
+                const itemQuantity = physicalItem ? physicalItem.quantity : 1;
                 // Save or update consignment in session storage
                 saveConsignmentToSession(
                     consignment.id,
                     consignment.lineItemIds[0],
-                    1,
+                    itemQuantity,
                     consignment.shippingAddress || baseAddress,
                     consignment.selectedShippingOption?.id || ''
                 );
@@ -1160,7 +1199,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             //     newConfiguredItems[consignment.lineItemId] = false;
             // });
             const newConfiguredItems = { ...configuredItems };
-           
+
             itemConsignments.forEach((consignment: {
                 lineItemId: string | number;
                 shippingAddress?: any;
@@ -1168,20 +1207,20 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             }) => {
                 // Only mark as false if it's not fully configured
                 // If it has both shipping address and shipping option, keep it as true if it was already true
-               
+
                 const isFullyConfigured =
                     consignment.shippingAddress &&
                     Object.keys(consignment.shippingAddress).length > 0 &&
                     consignment.selectedShippingOption;
-               
-               
+
+
                 // Only update if not fully configured or if it wasn't previously configured
                 if (!isFullyConfigured || !newConfiguredItems[consignment.lineItemId]) {
                     newConfiguredItems[consignment.lineItemId] = false;
                 }
             });
 
-            
+
             setConfiguredItems(newConfiguredItems);
 
             // Maintain editing context
@@ -1254,13 +1293,192 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
+    const handleAddGiftMessage = async (lineItemId: string | number) => {
+        setCurrentGiftMessageItemId(lineItemId);
+        setEditedGiftMessage('');
+        setIsEditGiftMessageModalOpen(true);
+    }
+
+    const handleEditGiftMessage = async (lineItemId: string | number, message: string | undefined) => {
+        const safeMessage = message ?? '';
+
+        setCurrentGiftMessageItemId(lineItemId);
+        setEditedGiftMessage(safeMessage);
+        setIsEditGiftMessageModalOpen(true);
+    };
+
+    const handleSubmitGiftMessage = async (message: string) => {
+        if (!currentGiftMessageItemId) return;
+
+        try {
+            setIsLoading(true);
+
+            // Get the current checkout
+            const checkout = getCheckout();
+            if (!checkout) {
+                throw new Error('Checkout not available');
+            }
+
+            const response = await fetch('https://bc-middleware-mm.onrender.com/cart/update-gift-message', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({
+                    cartId: checkout.id,
+                    itemId: currentGiftMessageItemId,
+                    message: message
+                })
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to update gift message');
+            }
+
+            // Fetch updated checkout to get consignments
+            const checkoutOptions = {
+                method: 'GET',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            const checkoutResponse = await fetch(
+                `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions`,
+                checkoutOptions
+            );
+
+            if (!checkoutResponse.ok) {
+                throw new Error('Failed to fetch updated checkout');
+            }
+
+            const result = await checkoutResponse.json();
+            const currentConsignments = result.consignments || [];
+
+            // Process consignments similar to splitLineItem logic
+            for (const item of itemConsignments) {
+
+                // Find the corresponding physical item to get its exact quantity
+                const physicalItem = physicalItems.find(
+                    physItem => physItem.id.toString() === item.lineItemId.toString()
+                );
+
+                // Get the quantity dynamically
+                const itemQuantity = physicalItem ? physicalItem.quantity : 1;
+
+                // Check if this item already has a consignment
+                const existingConsignment = currentConsignments.find((c: any) =>
+                    c.lineItemIds.length === 1 &&
+                    c.lineItemIds[0] === item.lineItemId.toString() &&
+                    c.lineItemIds.length === 1
+                );
+
+                // 1. Consignment exists but has no shipping option or address
+                if (
+                    (existingConsignment &&
+                        (!existingConsignment.selectedShippingOption ||
+                            !existingConsignment.shippingAddress ||
+                            Object.keys(existingConsignment.shippingAddress).length === 0)
+                    )
+                ) {
+                    const storedConsignment = findStoredConsignmentByLineItemId(
+                        item.lineItemId,
+                        itemQuantity
+                    );
+
+                    // If stored consignment exists, restore it
+                    if (storedConsignment?.selectedShippingOptionId) {
+                        try {
+                            await restoreConsignment(storedConsignment);
+                        } catch (restoreError) {
+                            console.error(`Error restoring consignment for item ${item.lineItemId}:`, restoreError);
+                        }
+                    }
+                }
+            }
+
+            // Merge consignments logic (similar to splitLineItem)
+            const mergeConsignments = (existingConsignments: ConsignmentWithItem[], newConsignments: any[]) => {
+                const consignmentMap = new Map<string | number, ConsignmentWithItem>();
+
+                // First, add existing consignments
+                existingConsignments.forEach(consignment => {
+                    if (!consignmentMap.has(consignment.lineItemId)) {
+                        consignmentMap.set(consignment.lineItemId, consignment);
+                    }
+                });
+
+                // Add or update with new consignments
+                newConsignments.forEach(newConsignment => {
+                    const lineItemId = newConsignment.lineItemIds[0];
+                    const existingConsignment = consignmentMap.get(lineItemId);
+
+                    const newConsignmentObj = {
+                        id: newConsignment.id,
+                        lineItemId,
+                        shippingAddress: newConsignment.shippingAddress,
+                        selectedShippingOption: newConsignment.selectedShippingOption,
+                        availableShippingOptions: newConsignment.availableShippingOptions || [],
+                    };
+
+                    // Prioritize consignments with complete shipping info
+                    if (!existingConsignment ||
+                        (newConsignmentObj.shippingAddress && newConsignmentObj.selectedShippingOption)) {
+                        consignmentMap.set(lineItemId, newConsignmentObj);
+                    }
+                });
+
+                return Array.from(consignmentMap.values());
+            };
+
+            // Update item consignments
+            setItemConsignments(prevConsignments =>
+                mergeConsignments(prevConsignments, currentConsignments)
+            );
+
+            // Update configured items state
+            const newConfiguredItems = { ...configuredItems };
+            itemConsignments.forEach((consignment: {
+                lineItemId: string | number;
+                shippingAddress?: any;
+                selectedShippingOption?: any;
+            }) => {
+                const isFullyConfigured =
+                    consignment.shippingAddress &&
+                    Object.keys(consignment.shippingAddress).length > 0 &&
+                    consignment.selectedShippingOption;
+
+                if (!isFullyConfigured || !newConfiguredItems[consignment.lineItemId]) {
+                    newConfiguredItems[consignment.lineItemId] = false;
+                }
+            });
+
+            setConfiguredItems(newConfiguredItems);
+
+            // Reload checkout to sync state
+            await loadCheckout();
+
+            // Refresh checkout totals
+            await refreshCheckoutTotals();
+
+            // Close modal and reset states
+            setIsEditGiftMessageModalOpen(false);
+            setCurrentGiftMessageItemId(null);
+        } catch (error) {
+            console.error('Error updating gift message:', error);
+            setError(error instanceof Error ? error.message : 'An unexpected error occurred');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
     const handleEditConsignment = async (index: number) => {
         // Check if any item is currently being edited
-        console.log('configuredItems', configuredItems)
         const isAnyItemEditing = Object.values(configuredItems).some(
             (isConfigured) => isConfigured === false
         );
-        console.log('isAnyItemEditing', isAnyItemEditing)
+
         // If another item is already being edited, prevent editing
         if (isAnyItemEditing) {
             setError('Please complete editing the current item first');
@@ -1305,11 +1523,24 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 c.lineItemIds.includes(itemId.toString())
             );
 
-            // Reset selections
+            // Prepare a fresh configuration state
+            const updatedConfiguredItems = { ...configuredItems };
+            Object.keys(updatedConfiguredItems).forEach(key => {
+                // Mark all other items as configured
+                if (key !== itemId.toString()) {
+                    updatedConfiguredItems[key] = true;
+                } else {
+                    // Mark the current item as not configured
+                    updatedConfiguredItems[key] = false;
+                }
+            });
+
+            // Explicitly reset selections
             setSelectedAddress(null);
             setSelectedShippingOption(null);
 
             if (relevantConsignment) {
+                // Update stored consignment
                 updateStoredConsignment(
                     relevantConsignment.id,
                     itemId,
@@ -1345,18 +1576,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     }
                 }
 
-                // Mark this item as not configured to allow editing
-                const updatedConfiguredItems = { ...configuredItems };
-
-                Object.keys(updatedConfiguredItems).forEach(key => {
-                    if (key !== itemId.toString()) {
-                        updatedConfiguredItems[key] = true;
-                    } else {
-                        updatedConfiguredItems[key] = false;
-                    }
-                });
-
-                delete updatedConfiguredItems[itemId];
+                // Update configured items
                 setConfiguredItems(updatedConfiguredItems);
             }
 
@@ -1417,6 +1637,10 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             !isConfigured &&
             item.quantity > 1 &&
             (!consignment || !consignment.id);
+
+        const hasGiftMessage = item.giftWrapping && item.giftWrapping.message;
+        const showAddGiftMessageButton = !hasGiftMessage && !showSplitButton;
+
         return (
             <div
                 key={item.id}
@@ -1451,6 +1675,39 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                 >
                                     Send to multiple recipients
                                 </Button>
+                            )}
+                            {/* Show Add Gift Message Button in Edit Mode */}
+                            {showAddGiftMessageButton && (
+                                <Button
+                                    onClick={() => handleAddGiftMessage(item.id)}
+                                    variant={ButtonVariant.Secondary}
+                                    className="tt-add-gift-message-button"
+                                    disabled={isLoading}
+                                >
+                                    Add Gift Message
+                                </Button>
+                            )}
+
+                            {/* Display Existing Gift Message in Edit Mode */}
+                            {hasGiftMessage && (
+                                <div className="tt-custom-gift-message-container">
+                                    <h4 className="tt-custom-gift-message-head">
+                                        Gift Message
+                                    </h4>
+                                    <div className="tt-custom-gift-message">
+                                        <div className="tt-custom-gift-message-text">{item?.giftWrapping?.message}</div>
+                                        <a
+                                            href="#"
+                                            onClick={(e) => {
+                                                e.preventDefault();
+                                                handleEditGiftMessage(item.id, item?.giftWrapping?.message || '');
+                                            }}
+                                            className="tt-edit-gift-message-link"
+                                        >
+                                            Edit
+                                        </a>
+                                    </div>
+                                </div>
                             )}
                             <h4 className="optimizedCheckout-headingSecondary">
                                 Shipping Address
@@ -1517,6 +1774,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             </div>
                         )}
 
+
+
+
+
+
                         {/* Error Alert */}
                         {error && (
                             <Alert>
@@ -1573,6 +1835,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                 </span>
                             )}
                         </div>
+                        {/* Display Gift Message in Edit Mode if it exists */}
+                        {hasGiftMessage && (
+                            <div className="tt-custom-gift-message-container">
+                                <h4 className="tt-custom-gift-message-head">
+                                    Gift Message
+                                </h4>
+                                <div className="tt-custom-gift-message">
+                                    <div className="tt-custom-gift-message-text">{item?.giftWrapping?.message}</div>
+                                </div>
+                            </div>
+                        )}
                         <div className="tt-custom-item-actions">
                             <Button
                                 onClick={() => handleEditConsignment(index)}
@@ -1623,6 +1896,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         onRequestClose={handleCloseAddAddressForm}
                         onSaveAddress={handleSaveAddress}
                         shouldShowSaveAddress={true}
+                    />
+
+                    <GiftMessageModal
+                        isOpen={isEditGiftMessageModalOpen}
+                        isLoading={isLoading}
+                        initialMessage={editedGiftMessage}
+                        onSubmit={handleSubmitGiftMessage}
+                        onRequestClose={() => {
+                            setIsEditGiftMessageModalOpen(false);
+                            setEditedGiftMessage('');  // Clear the message when closing
+                        }}
                     />
 
                     {/* Render all items in original order */}

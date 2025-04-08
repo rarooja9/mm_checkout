@@ -7,12 +7,312 @@
 // =============================================================================
 
 .form-addressState {
-    display: block; // 1
-    flex: 1; // 1
+  display: block; // 1
+  flex: 1; // 1
 }
 
 .shipping-address {
-    .address-line {
-        margin-bottom: 0;
-    }
+  .address-line {
+    margin-bottom: 0;
+  }
+}
+
+
+//custom shipping 
+.tt-custom-shipping-container {
+  padding: 1rem;
+}
+
+/* Using existing BigCommerce classes where possible */
+.tt-custom-shipping-container h2 {
+  margin-bottom: 1.5rem;
+}
+
+/* Configured Items List */
+.tt-custom-configured-items {
+  margin-bottom: 2rem;
+}
+
+.tt-custom-configured-item {
+  margin-bottom: 1rem;
+  border: 1px solid #eaeaea;
+  border-radius: 4px;
+}
+
+.tt-custom-configured-item-inner {
+  display: flex;
+  align-items: center;
+  padding: 1rem;
+}
+
+/* Use existing cart-item classes for consistency */
+.tt-custom-item-image-container {
+  flex: 0 0 80px;
+  margin-right: 1rem;
+}
+
+.tt-custom-item-image {
+  max-width: 100%;
+  height: auto;
+  border: 1px solid #f5f5f5;
+}
+
+/* Use existing checkout-form classes where appropriate */
+.tt-custom-item-details {
+  flex: 1 1 30%;
+  min-width: 0;
+  padding-right: 1rem;
+}
+
+.tt-custom-item-name {
+  display: block;
+  font-weight: 500;
+  margin-bottom: 0.25rem;
+  word-wrap: break-word;
+}
+
+.tt-custom-item-quantity {
+  color: #666;
+  font-size: 0.875rem;
+}
+
+.tt-custom-item-address {
+  flex: 1 1 30%;
+  min-width: 0;
+  padding-right: 1rem;
+  font-size: 0.875rem;
+}
+
+.tt-custom-address-name,
+.tt-custom-address-line,
+.tt-custom-address-city-state {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+
+.tt-custom-item-shipping-method {
+  flex: 1 1 20%;
+  font-size: 0.875rem;
+}
+
+.tt-custom-item-actions {
+  flex: 0 0 auto;
+}
+
+/* Current Item Being Configured */
+.tt-custom-current-item {
+  border: 1px solid #eaeaea;
+  border-radius: 4px;
+  padding: 1.5rem;
+  margin-top: 1.5rem;
+}
+
+.tt-custom-current-item-row {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  margin-bottom: 1.5rem;
+}
+
+.tt-custom-address-selection,
+.tt-custom-shipping-options {
+  width: 100%;
+}
+
+.tt-custom-address-selection h4,
+.tt-custom-shipping-options h4 {
+  font-size: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.tt-custom-address-select-container {
+  margin-bottom: 1rem;
+}
+
+.tt-custom-shipping-options-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+/* Similar to existing shipping option styles */
+.tt-custom-shipping-option {
+  display: flex;
+  align-items: center;
+  padding: 0.75rem;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tt-custom-shipping-option:hover {
+  background-color: #f9f9f9;
+}
+
+.tt-custom-shipping-option.selected {
+  border-color: #4d90fe;
+  background-color: #f0f7ff;
+}
+
+.tt-custom-shipping-option input {
+  margin-right: 0.75rem;
+}
+
+.tt-custom-shipping-option label {
+  display: flex;
+  justify-content: space-between;
+  width: 100%;
+  cursor: pointer;
+}
+
+.tt-custom-option-description {
+  font-weight: 500;
+}
+
+.tt-custom-option-cost {
+  font-weight: bold;
+}
+
+.tt-custom-option-transit {
+  font-size: 0.875rem;
+  color: #666;
+}
+
+.tt-custom-no-shipping-options {
+  padding: 0.75rem;
+  background-color: #f5f5f5;
+  border-radius: 4px;
+  color: #666;
+}
+
+/* Use existing form-actions class with custom prefix */
+.tt-custom-form-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 1.5rem;
+}
+
+/* Modal styles - use existing where possible */
+.tt-custom-modal-actions {
+  margin-top: 1rem;
+  display: flex;
+  justify-content: flex-end;
+}
+
+/* Responsive adjustments */
+@media (min-width: 768px) {
+  .tt-custom-current-item-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .tt-custom-item-image-container {
+    flex: 0 0 100px;
+  }
+
+  .tt-custom-item-details {
+    flex: 1 1 calc(50% - 100px);
+  }
+
+  .tt-custom-address-selection,
+  .tt-custom-shipping-options {
+    flex: 1 1 100%;
+  }
+}
+
+@media (min-width: 992px) {
+
+  .tt-custom-address-selection,
+  .tt-custom-shipping-options {
+    flex: 1 1 45%;
+  }
+}
+
+
+.tt-custom-final-step {
+  margin-top: 2rem;
+  padding: 1.5rem;
+  border: 1px solid #eaeaea;
+  border-radius: 4px;
+  background-color: #f9f9f9;
+}
+
+.tt-custom-final-message {
+  margin-bottom: 1.5rem;
+  text-align: center;
+}
+
+/* Add a little more space at the bottom of the configured items container when showing the final button */
+.tt-custom-configured-items {
+  margin-bottom: 2rem;
+}
+
+/* Make completed items list more visually separated */
+.tt-custom-configured-items .tt-custom-configured-item:not(:last-child) {
+  margin-bottom: 0.75rem;
+}
+
+.tt-custom-item-wrapper {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 20px;
+  border: 1px solid #e0e0e0;
+  padding: 15px;
+}
+
+.tt-custom-item-base-info {
+  display: flex;
+  align-items: center;
+  margin-bottom: 15px;
+}
+
+.tt-custom-item-image-container {
+  margin-right: 15px;
+}
+
+.tt-custom-item-image {
+  width: 80px;
+  height: 80px;
+  object-fit: cover;
+}
+
+.tt-custom-item-editing-container,
+.tt-custom-item-configured-container {
+  display: flex;
+  flex-direction: column;
+}
+
+/* Gift Message Styling for Edit Mode */
+.tt-custom-gift-message-container {
+  margin-top: 15px;
+  padding: 15px;
+  border-top: 1px solid #e5e5e5;
+}
+
+.tt-custom-gift-message-head {
+  margin-bottom: 5px;
+}
+
+.tt-custom-gift-message {
+  margin-top: 5px;
+  display: flex;
+}
+
+.tt-custom-gift-message-text {
+  color: #505050;
+  word-break: break-all;
+}
+.tt-edit-gift-message-link {
+  color: #0066cc;
+  text-decoration: none;
+  margin-left: 10px;
+}
+
+.tt-edit-gift-message-link:hover {
+  text-decoration: underline;
+}
+
+.gift-message-popup .modal-body {
+  overflow: hidden !important;
 }
