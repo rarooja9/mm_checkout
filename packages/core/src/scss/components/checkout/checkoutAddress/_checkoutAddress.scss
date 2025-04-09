@@ -316,3 +316,20 @@
 .gift-message-popup .modal-body {
   overflow: hidden !important;
 }
+
+.tt-delivery-date-picker {
+  width: 100%;
+}
+.tt-delivery-date-picker .react-datepicker-wrapper {
+  width: 100%;
+}
+.tt-delivery-date-picker .react-datepicker__input-container {
+  width: 100%;
+}
+.tt-delivery-date-picker .react-datepicker__input-container input {
+  width: 100%;
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  box-sizing: border-box;
+}

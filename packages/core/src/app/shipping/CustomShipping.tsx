@@ -4,6 +4,7 @@ import { LoadingOverlay } from '../ui/loading';
 import { Alert } from '../ui/alert';
 import { TranslatedString } from '@bigcommerce/checkout/locale';
 import { useCheckout } from "@bigcommerce/checkout/payment-integration-api";
+import DatePicker from 'react-datepicker';
 import {
     Cart,
     Country,
@@ -31,6 +32,20 @@ class InvalidAddressError extends Error {
         super('The address is invalid');
         this.name = 'InvalidAddressError';
     }
+}
+
+interface ShippingDate {
+    display: string;
+    iso: string;
+    value: number;
+}
+
+interface ShippingDateResponse {
+    availableDates?: ShippingDate[];
+    methods?: Array<{
+        method: string;
+        availableDates: ShippingDate[];
+    }>;
 }
 
 export interface LineItem {
@@ -128,6 +143,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const [isEditGiftMessageModalOpen, setIsEditGiftMessageModalOpen] = useState(false);
     const [currentGiftMessageItemId, setCurrentGiftMessageItemId] = useState<string | number | null>(null);
     const [editedGiftMessage, setEditedGiftMessage] = useState('');
+
+    const [availableShippingDates, setAvailableShippingDates] = useState<Date[]>([]);
+    const [selectedShippingDate, setSelectedShippingDate] = useState<Date | null>(null);
 
     const physicalItems = cart.lineItems.physicalItems;
 
@@ -643,10 +661,24 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         try {
             // Get current consignment from our local state
             const currentConsignment = getCurrentConsignment();
+            const currentItem = getCurrentItem();
 
             if (currentConsignment && currentConsignment.id) {
                 // Use direct API call to update shipping option
                 const result = await updateConsignmentShippingOption(currentConsignment.id, option.id);
+
+                // Fetch available dates
+                const dates = await fetchShippingDates(
+                    selectedAddress,
+                    currentItem.id,
+                    option.method || option.description
+                );
+
+                // Set the available dates in state
+                setAvailableShippingDates(dates);
+
+                // Reset selected date when shipping option changes
+                setSelectedShippingDate(null);
 
                 // Get updated consignments
                 const updatedConsignments = result.consignments || [];
@@ -723,6 +755,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
         setSelectedAddress(address);
         setIsLoading(true);
+
+        setAvailableShippingDates([]);
+
+        // Reset selected date when shipping option changes
+        setSelectedShippingDate(null);
 
         try {
             // Instead of using the SDK's assignItem, use direct API call to create a separate consignment
@@ -827,6 +864,12 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
         if (hasShippingOptions && !selectedShippingOption) {
             setError('Please select a shipping method');
+            return;
+        }
+
+        // New validation for delivery date
+        if (hasShippingOptions && !selectedShippingDate) {
+            setError('Please select a delivery date');
             return;
         }
 
@@ -1293,6 +1336,104 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
+    const fetchShippingDates = async (
+        address: Address,
+        lineItemId: string | number,
+        shippingMethod: string
+    ) => {
+        try {
+            const checkout = getCheckout();
+            if (!checkout) {
+                throw new Error('Checkout not available');
+            }
+
+            const requestBody = {
+                cartId: checkout.id,
+                itemId: lineItemId.toString(),
+                quantity: 1,
+                shippingMethod: shippingMethod,
+                address: {
+                    country: address.countryCode,
+                    region: address.stateOrProvinceCode,
+                    city: address.city,
+                    zipcode: address.postalCode
+                }
+            };
+
+            const response = await fetch('https://bc-middleware-mm.onrender.com/get-dates', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch shipping dates');
+            }
+
+            const dateData: ShippingDateResponse = await response.json();
+
+            // First, check if there are method-specific dates
+            let matchedDates: { display: string; iso: string; value: number }[] = [];
+
+            if (dateData.methods) {
+                const methodMatch = dateData.methods.find(m =>
+                    m.method.toLowerCase() === shippingMethod.toLowerCase()
+                );
+
+                if (methodMatch) {
+                    matchedDates = methodMatch.availableDates;
+                }
+            }
+
+            // If no method-specific dates, fall back to general available dates
+            if (matchedDates.length === 0 && dateData.availableDates) {
+                matchedDates = dateData.availableDates;
+            }
+
+            // If still no dates, generate default dates
+            if (matchedDates.length === 0) {
+                const defaultDates = generateDefaultDates();
+                matchedDates = defaultDates.map(date => ({
+                    display: date.toLocaleDateString(),
+                    iso: date.toISOString().split('T')[0],
+                    value: date.getTime()
+                }));
+            }
+
+            // Return the matched dates without setting state
+            return matchedDates.map(dateObj => new Date(dateObj.value));
+        } catch (error) {
+            console.error('Error fetching shipping dates:', error);
+
+            // Fallback to default dates
+            const defaultDates = generateDefaultDates();
+            return defaultDates;
+        }
+    };
+
+    // Function to generate default dates if no specific dates are available
+    const generateDefaultDates = () => {
+        const today = new Date();
+        const startDate = new Date(today);
+        startDate.setDate(today.getDate() + 2); // Start from 2 days from now
+
+        const dates: Date[] = [];
+        const endDate = new Date(today);
+        endDate.setMonth(today.getMonth() + 1, 30); // 1.5 months from now
+
+        while (startDate <= endDate) {
+            // Exclude weekends if needed
+            if (startDate.getDay() !== 0 && startDate.getDay() !== 6) {
+                dates.push(new Date(startDate));
+            }
+            startDate.setDate(startDate.getDate() + 1);
+        }
+
+        return dates;
+    };
+
     const handleAddGiftMessage = async (lineItemId: string | number) => {
         setCurrentGiftMessageItemId(lineItemId);
         setEditedGiftMessage('');
@@ -1305,6 +1446,14 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         setCurrentGiftMessageItemId(lineItemId);
         setEditedGiftMessage(safeMessage);
         setIsEditGiftMessageModalOpen(true);
+    };
+
+    const handleDateSelection = async (date: Date) => {
+        setSelectedShippingDate(date);
+
+        console.log('Selected delivery date:', date);
+
+        return date;
     };
 
     const handleSubmitGiftMessage = async (message: string) => {
@@ -1629,6 +1778,65 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         return <div>Loading...</div>;
     }
 
+    const renderShippingOptions = () => {
+        const currentConsignment = getCurrentConsignment();
+
+        return (
+            <>
+                {selectedAddress && currentConsignment && currentConsignment.availableShippingOptions && currentConsignment.availableShippingOptions.length > 0 ? (
+                    <div className="tt-custom-shipping-options-list">
+                        {currentConsignment.availableShippingOptions.map(option => (
+                            <div
+                                key={option.id}
+                                className={`tt-custom-shipping-option ${selectedShippingOption?.id === option.id ? 'selected' : ''}`}
+                                onClick={() => handleShippingOptionSelect(option)}
+                            >
+                                <input
+                                    type="radio"
+                                    name="shippingOption"
+                                    id={`${getCurrentItem()?.id}-${option.id}`}
+                                    checked={selectedShippingOption?.id === option.id}
+                                    onChange={() => handleShippingOptionSelect(option)}
+                                />
+                                <label htmlFor={`${getCurrentItem()?.id}-${option.id}`}>
+                                    <div className="tt-custom-option-description">{option.description}</div>
+                                    <div className="tt-custom-option-cost">${option.cost.toFixed(2)}</div>
+                                    {option.transitTime && <div className="tt-custom-option-transit">{option.transitTime}</div>}
+                                </label>
+                            </div>
+                        ))}
+                    </div>
+                ) : (
+                    <div className="tt-custom-no-shipping-options">
+                        No shipping options available for this address
+                    </div>
+                )}
+
+                {/* Date Picker */}
+                {selectedShippingOption && availableShippingDates.length > 0 && (
+                    <div className="tt-custom-shipping-date-picker" style={{ marginTop: '1rem'}} >
+                        <h4 className="optimizedCheckout-headingSecondary" style={{ marginBottom: '0. 5rem' }} >
+                            Select Delivery Date
+                        </h4>
+                        <div className="tt-delivery-date-picker">
+                            <DatePicker
+                                selected={selectedShippingDate}
+                                onChange={(date: Date) => handleDateSelection(date)}
+                                includeDates={availableShippingDates}
+                                minDate={availableShippingDates[0]}
+                                maxDate={availableShippingDates[availableShippingDates.length - 1]}
+                                placeholderText="Select a delivery date"
+                                className="tt-delivery-date-input"
+                                calendarClassName="tt-delivery-date-calendar"
+                                popperClassName="tt-delivery-date-popper"
+                            />
+                        </div>
+                    </div>
+                )}
+            </>
+        );
+    };
+
     const renderItem = (item: LineItem, index: number) => {
         const isConfigured = configuredItems[item.id];
         const isBeingEdited = currentItemIndex === index && !isConfigured;
@@ -1743,41 +1951,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                     Shipping Method
                                 </h4>
 
-                                {currentConsignment && currentConsignment.availableShippingOptions && currentConsignment.availableShippingOptions.length > 0 ? (
-                                    <div className="tt-custom-shipping-options-list">
-                                        {currentConsignment.availableShippingOptions.map(option => (
-                                            <div
-                                                key={option.id}
-                                                className={`tt-custom-shipping-option ${selectedShippingOption?.id === option.id ? 'selected' : ''}`}
-                                                onClick={() => handleShippingOptionSelect(option)}
-                                            >
-                                                <input
-                                                    type="radio"
-                                                    name="shippingOption"
-                                                    id={`${item.id}-${option.id}`}
-                                                    checked={selectedShippingOption?.id === option.id}
-                                                    onChange={() => handleShippingOptionSelect(option)}
-                                                />
-                                                <label htmlFor={`${item.id}-${option.id}`}>
-                                                    <div className="tt-custom-option-description">{option.description}</div>
-                                                    <div className="tt-custom-option-cost">${option.cost.toFixed(2)}</div>
-                                                    {option.transitTime && <div className="tt-custom-option-transit">{option.transitTime}</div>}
-                                                </label>
-                                            </div>
-                                        ))}
-                                    </div>
-                                ) : (
-                                    <div className="tt-custom-no-shipping-options">
-                                        No shipping options available for this address
-                                    </div>
-                                )}
+                                {renderShippingOptions()}
                             </div>
                         )}
-
-
-
-
-
 
                         {/* Error Alert */}
                         {error && (
