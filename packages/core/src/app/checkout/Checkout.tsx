@@ -314,9 +314,17 @@ class Checkout extends Component<
     }
 
     private renderContent(): ReactNode {
-        const { isPending, loginUrl, promotions = [], steps, isShowingWalletButtonsOnTop, extensionState } = this.props;
+        const { isPending, loginUrl, promotions = [], steps, isShowingWalletButtonsOnTop, extensionState, cart } = this.props;
 
-        const { activeStepType, defaultStepType, isCartEmpty, isRedirecting } = this.state;
+        const { activeStepType, isCartEmpty, isRedirecting } = this.state;
+
+        let defaultStepType;
+        if (cart?.lineItems?.physicalItems?.length) {
+            defaultStepType = this.state.defaultStepType == 'customer' ? this.state.defaultStepType : 'shipping';
+        }
+        else {
+            defaultStepType = this.state.defaultStepType
+        }
 
         if (isCartEmpty) {
             return <EmptyCartMessage loginUrl={loginUrl} waitInterval={3000} />;
