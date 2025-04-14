@@ -218,79 +218,92 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
     const clearDeliveryDateForItem = async (checkoutId: string, lineItemId: { toString: () => any; }) => {
         try {
-          // Fetch cart data with options
-          const options = {
-            method: 'GET',
-            headers: { 
-              Accept: 'application/json', 
-              'Content-Type': 'application/json' 
+            // Fetch cart data with options
+            const options = {
+                method: 'GET',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            const response = await fetch('/api/storefront/carts?include=lineItems.physicalItems.options', options);
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch cart data');
             }
-          };
-          
-          const response = await fetch('/api/storefront/carts?include=lineItems.physicalItems.options', options);
-          
-          if (!response.ok) {
-            throw new Error('Failed to fetch cart data');
-          }
-          
-          const cartData = await response.json();
-          if (!cartData || !cartData.length || !cartData[0].lineItems) {
-            console.log('No cart data found');
-            return false;
-          }
-       
-          // Find the specific item
-          const cartItem = cartData[0].lineItems.physicalItems.find(
-              (            item: { id: { toString: () => any; }; }) => item.id.toString() === lineItemId.toString()
-          );
-        
-          if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
-            console.log(`No valid cart item or options found for ${lineItemId}`);
-            return false;
-          }
-          
-          // Look for a delivery date option
-          const deliveryDateOption = cartItem.options.find((option: { name: string | string[]; }) => 
-            option.name === "Delivery Date" || option.name.includes("Delivery Date")
-          );
-          if (!deliveryDateOption || !deliveryDateOption.nameId) {
-            console.log(`No delivery date option found for item ${lineItemId}`);
-            return false;
-          }
-          
-          // Clear the delivery date
-          const updateOptions = {
-            method: 'PUT',
-            headers: {
-              'Accept': 'application/json',
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              lineItem: {
-                productId: cartItem.productId,
-                variantId: cartItem.variantId,
-                quantity: cartItem.quantity,
-                optionSelections: [{
-                  optionId: deliveryDateOption.nameId,
-                  optionValue: ""
-                }]
-              }
-            })
-          };
-          
-          const updateResponse = await fetch(`/api/storefront/carts/${checkoutId}/items/${lineItemId}`, updateOptions);
-          
-          if (!updateResponse.ok) {
-            throw new Error(`Failed to update delivery date for item ${lineItemId}`);
-          }
-          
-          console.log(`Cleared delivery date for item ${lineItemId}`);
-          return true;
+
+            const cartData = await response.json();
+            if (!cartData || !cartData.length || !cartData[0].lineItems) {
+                console.log('No cart data found');
+                return false;
+            }
+
+            // Find the specific item
+            const cartItem = cartData[0].lineItems.physicalItems.find(
+                (item: { id: { toString: () => any; }; }) => item.id.toString() === lineItemId.toString()
+            );
+
+            if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
+                console.log(`No valid cart item or options found for ${lineItemId}`);
+                return false;
+            }
+
+            // Look for a delivery date option
+            const deliveryDateOption = cartItem.options.find((option: { name: string | string[]; }) =>
+                option.name === "Delivery Date" || option.name.includes("Delivery Date")
+            );
+            if (!deliveryDateOption || !deliveryDateOption.nameId) {
+                console.log(`No delivery date option found for item ${lineItemId}`);
+                return false;
+            }
+
+            // Build option selections array preserving all existing options
+            const optionSelections = cartItem.options.map((option: { nameId: any; value: any; valueId: any; }) => ({
+                optionId: option.nameId,
+                optionValue: option.valueId || option.value
+            }));
+
+            // Find and update the delivery date option to empty string
+            const deliveryDateIndex = optionSelections.findIndex(
+                (option: { optionId: any; }) => option.optionId === deliveryDateOption.nameId
+            );
+
+            if (deliveryDateIndex >= 0) {
+                // Clear the delivery date value while preserving the option
+                optionSelections[deliveryDateIndex].optionValue = "";
+            }
+
+            // Clear the delivery date while preserving all other options
+            const updateOptions = {
+                method: 'PUT',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    lineItem: {
+                        productId: cartItem.productId,
+                        variantId: cartItem.variantId,
+                        quantity: cartItem.quantity,
+                        optionSelections: optionSelections
+                    }
+                })
+            };
+
+            const updateResponse = await fetch(`/api/storefront/carts/${checkoutId}/items/${lineItemId}`, updateOptions);
+
+            if (!updateResponse.ok) {
+                throw new Error(`Failed to update delivery date for item ${lineItemId}`);
+            }
+
+            console.log(`Cleared delivery date for item ${lineItemId}`);
+            return true;
         } catch (error) {
-          console.error(`Error clearing delivery date for item ${lineItemId}:`, error);
-          return false;
+            console.error(`Error clearing delivery date for item ${lineItemId}:`, error);
+            return false;
         }
-      };
+    };
 
     useEffect(() => {
         fetchCartData();
@@ -312,7 +325,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         const initConsignments = async () => {
             if (physicalItems.length > 0) {
                 setIsLoading(true);
-
                 try {
                     await fetchCartData();
 
@@ -1325,7 +1337,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         item.lineItemId,
                         itemQuantity
                     );
-                 
+
                     // If stored consignment exists, restore it
                     if (storedConsignment?.selectedShippingOptionId) {
                         try {
@@ -1591,9 +1603,10 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             // First, check if there are method-specific dates
             let matchedDates: { display: string; iso: string; value: number }[] = [];
 
+
             if (dateData.methods) {
                 const methodMatch = dateData.methods.find(m =>
-                    m.method.toLowerCase() === shippingMethod.toLowerCase()
+                    shippingMethod.toLowerCase().includes(m.method.toLowerCase())
                 );
 
                 if (methodMatch) {
@@ -1672,6 +1685,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             }
 
             const currentItem = getCurrentItem();
+            console.log('currentItem', currentItem)
             if (!currentItem) {
                 throw new Error('No current item selected');
             }
@@ -1708,6 +1722,52 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 return date;
             }
 
+            const options = {
+                method: 'GET',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            };
+
+            const cartResponse = await fetch('/api/storefront/carts?include=lineItems.physicalItems.options', options);
+
+            if (!cartResponse.ok) {
+                throw new Error('Failed to fetch cart data');
+            }
+
+            const cartData = await cartResponse.json();
+
+            const cartItem = cartData[0]?.lineItems.physicalItems.find(
+                (item: { id: any; }) => item.id === currentItem.id
+            );
+
+            if (!cartItem || !cartItem.options) {
+                throw new Error('Failed to retrieve item options');
+            }
+
+            // Build option selections array preserving all existing options
+            const optionSelections = cartItem.options.map((option: { nameId: any; value: any; valueId: any; }) => ({
+                optionId: option.nameId,
+                optionValue: option.valueId || option.value
+            }));
+
+            // Find and update or add the delivery date option
+            const deliveryDateIndex = optionSelections.findIndex(
+                (option: { optionId: any; }) => option.optionId === deliveryDateOptionId
+            );
+
+            if (deliveryDateIndex >= 0) {
+                // Update existing delivery date option
+                optionSelections[deliveryDateIndex].optionValue = formattedDate;
+            } else {
+                // Add delivery date option if it doesn't exist
+                optionSelections.push({
+                    optionId: deliveryDateOptionId,
+                    optionValue: formattedDate
+                });
+            }
+
             // Step 2: Update the cart item with the delivery date
             const updateOptions = {
                 method: 'PUT',
@@ -1720,14 +1780,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         productId: currentItem.productId,
                         variantId: currentItem.variantId,
                         quantity: currentItem.quantity,
-                        optionSelections: [{
-                            optionId: deliveryDateOptionId,
-                            optionValue: formattedDate
-                        }]
+                        optionSelections: optionSelections
                     }
                 })
             };
-
+            console.log('updateOptions', updateOptions)
             const updateResponse = await fetch(`/api/storefront/carts/${checkout.id}/items/${currentItem.id}`, updateOptions);
 
             if (!updateResponse.ok) {
