@@ -38,6 +38,7 @@ import ShippingHeader from './ShippingHeader';
 import { SingleShippingFormValues } from './SingleShippingForm';
 import StripeShipping from './stripeUPE/StripeShipping';
 import CustomShipping from './CustomShipping';
+import MultiShippingGuestForm from './MultiShippingGuestForm';
 
 
 export interface ShippingProps {
@@ -161,6 +162,11 @@ class Shipping extends Component<ShippingProps & WithCheckoutShippingProps, Ship
         }
 
         if (isCustomShipping) {
+            if (isGuest) {
+                return (
+                    <MultiShippingGuestForm onCreateAccount={this.props.onCreateAccount}  onSignIn={this.props.onSignIn} />
+                );
+            }
             return <CustomShipping 
               isBillingSameAsShipping={this.props.isBillingSameAsShipping}
               cartHasChanged={this.props.cartHasChanged}

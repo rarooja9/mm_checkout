@@ -349,3 +349,551 @@
 .tt-custom-delivery-date-value {
   color: #4a4a4a;
 }
+.shipping-calendar-container {
+  font-family: 'Arial', sans-serif;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 16px;
+}
+
+.calendar-navigation {
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.calendar-title {
+  color: #1f2937;
+  font-weight: 600;
+}
+
+.weekday-header {
+  font-weight: 600;
+  color: #4b5563;
+  background-color: #e5e7eb;
+  border-radius: 4px;
+}
+
+.calendar-grid {
+  gap: 4px;
+}
+
+.calendar-day {
+  min-height: 80px;
+  transition: all 0.2s ease;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+}
+
+.calendar-day:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  cursor: pointer;
+}
+
+.calendar-day--today {
+  background-color: #ebf5ff !important;
+  border: 2px solid #3b82f6 !important;
+}
+
+.calendar-day--selected {
+  background-color: #ecfdf5 !important;
+  border: 2px solid #10b981 !important;
+}
+
+.calendar-day--empty {
+  background-color: #f3f4f6;
+}
+
+.day-number {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  text-align: center;
+  line-height: 24px;
+  border-radius: 50%;
+}
+
+.options-badge {
+  background-color: #d1fae5;
+  color: #065f46;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.method-item {
+  padding: 2px 4px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  font-size: 0.75rem;
+}
+
+.method-item:hover {
+  background-color: #e5e7eb;
+}
+
+.method-item--selected {
+  background-color: #d1fae5;
+  color: #065f46;
+  font-weight: 600;
+}
+
+.more-options {
+  color: #2563eb;
+  margin-top: 4px;
+  font-size: 0.75rem;
+}
+
+.method-modal-overlay {
+  backdrop-filter: blur(3px);
+}
+
+.method-modal-container {
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+}
+
+.method-card {
+  border-radius: 6px;
+  transition: all 0.2s ease;
+  cursor: pointer;
+  border: 1px solid #e5e7eb;
+}
+
+.method-card:hover {
+  background-color: #f3f4f6;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.method-card--selected {
+  border-color: #10b981;
+  background-color: #d1fae5;
+}
+
+/* Add these styles to your CSS */
+.date-picker-input {
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  height: 42px;
+}
+
+.date-picker-icon {
+  color: #757575;
+}
+
+.date-picker-input:hover {
+  border-color: #666;
+}
+
+.selected-shipping-option {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px;
+  border: 1px solid #e5e5e5;
+  border-radius: 4px;
+  margin-bottom: 15px;
+}
+
+.option-description {
+  flex-grow: 1;
+  font-weight: 500;
+}
+
+.option-cost {
+  margin-right: 15px;
+  font-weight: 600;
+}
+
+.delivery-date-picker-field {
+  margin-top: 15px;
+}
+
+
+//Calendar 
+/* Shipping Calendar Container */
+.shipping-calendar-container {
+  font-family: 'Arial', sans-serif;
+  background-color: #f9fafb;
+  border-radius: 8px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  padding: 16px;
+}
+
+/* Calendar Header */
+.tt-header {
+  margin-bottom: 16px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #e5e7eb;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.tt-title-container {
+  display: flex;
+  align-items: center;
+}
+
+.tt-icon {
+  color: #3b82f6;
+  width: 20px;
+  height: 20px;
+  margin-right: 8px;
+}
+
+.tt-title {
+  color: #1f2937;
+  font-weight: 600;
+  font-size: 18px;
+  margin: 0;
+}
+
+.tt-nav {
+  display: flex;
+  align-items: center;
+}
+
+.tt-month-year {
+  color: #1f2937;
+  font-weight: 600;
+  margin: 0 12px;
+}
+
+.tt-nav-button {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: #f3f4f6;
+  border: none;
+  border-radius: 50%;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  color: #4b5563;
+}
+
+.tt-nav-button:hover {
+  background-color: #e5e7eb;
+}
+
+.tt-nav-button svg {
+  width: 16px;
+  height: 16px;
+}
+
+/* Calendar Grid */
+.tt-weekdays {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.tt-weekday {
+  font-weight: 600;
+  color: #4b5563;
+  background-color: #e5e7eb;
+  border-radius: 4px;
+  text-align: center;
+  padding: 8px 0;
+  font-size: 14px;
+}
+
+.tt-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+}
+
+.tt-day-empty {
+  background-color: #f3f4f6;
+  min-height: 80px;
+  border-radius: 4px;
+}
+
+.tt-day {
+  min-height: 80px;
+  padding: 8px;
+  border-radius: 4px;
+  border: 1px solid #e5e7eb;
+  transition: all 0.2s ease;
+  background-color: #fff;
+  cursor: pointer;
+  overflow: hidden;
+}
+
+.tt-day:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+}
+
+.tt-day-today {
+  background-color: #ebf5ff;
+  border: 2px solid #3b82f6;
+}
+
+.tt-day-selected {
+  background-color: #ecfdf5;
+  border: 2px solid #10b981;
+}
+
+.tt-day-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 4px;
+}
+
+.tt-day-number {
+  display: inline-block;
+  width: 24px;
+  height: 24px;
+  text-align: center;
+  line-height: 24px;
+  font-weight: 600;
+  font-size: 14px;
+  border-radius: 50%;
+}
+
+.tt-day-today .tt-day-number {
+  background-color: #3b82f6;
+  color: #fff;
+}
+
+.tt-options-badge {
+  background-color: #d1fae5;
+  color: #065f46;
+  border-radius: 12px;
+  padding: 2px 8px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.tt-method-list {
+  margin-top: 4px;
+}
+
+.tt-method-item {
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: all 0.2s ease;
+  font-size: 12px;
+  color: #000000;
+  margin-bottom: 2px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.tt-method-item:hover {
+  background-color: #a7f3d0;
+}
+
+/* Removed selected style as we now open modal instead */
+
+.tt-more-options {
+  color: #2563eb;
+  margin-top: 2px;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+/* Selected Shipping Container */
+.selected-shipping-container {
+  margin-top: 16px;
+  padding: 12px;
+  background-color: #ecfdf5;
+  border: 1px solid #a7f3d0;
+  border-radius: 8px;
+}
+
+.selected-shipping-info {
+  display: flex;
+  justify-content: space-between;
+}
+
+.selected-shipping-label {
+  font-weight: 600;
+  color: #4b5563;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.selected-shipping-value {
+  color: #10b981;
+  font-weight: 500;
+  font-size: 14px;
+}
+
+/* Modal Styles */
+.tt-modal-overlay {
+  position: fixed;
+  inset: 0;
+  background-color: rgba(0, 0, 0, 0.5);
+  backdrop-filter: blur(3px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 50;
+}
+
+.tt-modal {
+  background-color: white;
+  border-radius: 8px;
+  box-shadow: 0 10px 25px rgba(0, 0, 0, 0.2);
+  width: 100%;
+  max-width: 480px;
+  overflow: hidden;
+}
+
+.tt-modal-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 12px 16px;
+}
+
+.tt-modal-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #1f2937;
+  margin: 0;
+}
+
+.tt-close-button {
+  background: none;
+  border: none;
+  color: #6b7280;
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.tt-close-button:hover {
+  color: #1f2937;
+}
+
+.tt-close-button svg {
+  width: 20px;
+  height: 20px;
+}
+
+.tt-modal-body {
+  padding: 16px;
+  max-height: 384px;
+  overflow-y: auto;
+}
+
+.tt-method-card {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.tt-method-card:hover {
+  background-color: #f3f4f6;
+  transform: translateY(-2px);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+.tt-method-card-selected {
+  border-color: #10b981;
+  background-color: #d1fae5;
+}
+
+.tt-method-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.tt-method-name {
+  font-weight: 500;
+  color: #1f2937;
+}
+
+.tt-method-price {
+  background-color: #d1fae5;
+  color: #065f46;
+  border-radius: 12px;
+  padding: 4px 8px;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+.tt-modal-footer {
+  border-top: 1px solid #e5e7eb;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.tt-button {
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.tt-button {
+  margin-left: 8px;
+}
+
+.tt-button-secondary {
+  background-color: #f3f4f6;
+  color: #4b5563;
+}
+
+.tt-button-secondary:hover {
+  background-color: #e5e7eb;
+  color: #1f2937;
+}
+
+.tt-button-primary {
+  background-color: #3b82f6;
+  color: white;
+}
+
+.tt-button-primary:hover {
+  background-color: #2563eb;
+}
+
+/* Loading state */
+.tt-loading {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 32px;
+  color: #6b7280;
+}
+
+/* Responsive adjustments */
+@media (max-width: 640px) {
+  .selected-shipping-info {
+    flex-direction: column;
+  }
+  
+  .selected-shipping-info > div:not(:last-child) {
+    margin-bottom: 8px;
+  }
+}

@@ -5,6 +5,7 @@ import { Alert } from '../ui/alert';
 import { TranslatedString } from '@bigcommerce/checkout/locale';
 import { useCheckout } from "@bigcommerce/checkout/payment-integration-api";
 import DatePicker from 'react-datepicker';
+//import '../styles/tailwind.css';
 import {
     Cart,
     Country,
@@ -24,6 +25,7 @@ import {
 import { AddressFormModal, AddressFormValues, AddressSelect, AddressType, mapAddressFromFormValues, isValidAddress } from "../address";
 import GiftMessageModal from "./GiftMessageModal"
 import { ErrorModal } from '../common/error';
+import DeliveryDateModal from './DeliveryDateModal';
 //import getRecommendedShippingOption from './getRecommendedShippingOption';
 
 // Creating a custom error class similar to ConsignmentAddressSelector
@@ -149,6 +151,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const [selectedShippingDate, setSelectedShippingDate] = useState<Date | null>(null);
     const [cartItems, setCartItems] = useState<any[]>([]);
 
+    const [shippingCalendarData, setShippingCalendarData] = useState<any>(null);
+    const [isDeliveryDateModalOpen, setIsDeliveryDateModalOpen] = useState(false);
     const physicalItems = cart.lineItems.physicalItems;
 
     const getOrderedPhysicalItems = () => {
@@ -944,8 +948,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
-
-
     const handleAddressSelect = async (address: Address) => {
         // Validate address before proceeding
         if (getFields && !isValidAddress(address, getFields(address.countryCode))) {
@@ -958,13 +960,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         setSelectedAddress(address);
         setIsLoading(true);
 
-        setAvailableShippingDates([]);
-
-        // Reset selected date when shipping option changes
-        setSelectedShippingDate(null);
-
         try {
-            // Instead of using the SDK's assignItem, use direct API call to create a separate consignment
+            // Create consignment to get shipping options
             const currentItem = getCurrentItem();
 
             if (currentItem) {
@@ -984,7 +981,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                 // Update our item consignments list
                 if (newConsignment) {
-
+                    // Save consignment to session
                     saveConsignmentToSession(
                         newConsignment.id,
                         currentItem.id,
@@ -1006,8 +1003,13 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                         setItemConsignments(updatedItemConsignments);
 
-                        // IMPORTANT: Do NOT auto-select a shipping option here!
-                        // Just load the checkout to ensure UI is in sync
+                        // Fetch delivery dates in parallel for all available shipping methods
+                        if (newConsignment.availableShippingOptions && newConsignment.availableShippingOptions.length > 0) {
+                            // Get delivery dates for the current item and address
+                            await fetchAllShippingDates(address, currentItem.id, newConsignment.availableShippingOptions);
+                        }
+
+                        // Load the checkout to ensure UI is in sync
                         await loadCheckout();
                     }
                 }
@@ -1022,6 +1024,156 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             setIsLoading(false);
         }
     };
+
+    const fetchAllShippingDates = async (
+        address: Address,
+        lineItemId: string | number,
+        availableShippingOptions: any[]
+    ) => {
+        try {
+            setIsLoadingDates(true);
+            const checkout = getCheckout();
+            if (!checkout) {
+                throw new Error('Checkout not available');
+            }
+
+            const requestBody = {
+                cartId: checkout.id,
+                itemId: lineItemId.toString(),
+                quantity: 1,
+                shippingMethod: "",
+                address: {
+                    country: address.countryCode,
+                    region: address.stateOrProvinceCode,
+                    city: address.city,
+                    zipcode: address.postalCode
+                }
+            };
+
+            // Fetch available dates from middleware
+            const response = await fetch('https://bc-middleware-mm.onrender.com/get-dates', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(requestBody)
+            });
+
+            if (!response.ok) {
+                throw new Error('Failed to fetch shipping dates');
+            }
+
+            const dateData: ShippingDateResponse = await response.json();
+
+            // Create a map of shipping methods with their available dates
+            const shippingMethodsWithDates = [];
+
+            // Process each available shipping option
+            for (const option of availableShippingOptions) {
+                const methodName = option.description;
+                const methodId = option.id;
+                const methodCost = option.cost;
+
+                // Try to find a match in the dateData.methods
+                let matchedDates: any = [];
+
+                if (dateData.methods) {
+                    const methodMatch = dateData.methods.find(m =>
+                        methodName.toLowerCase().includes(m.method.toLowerCase()) ||
+                        m.method.toLowerCase().includes(methodName.toLowerCase())
+                    );
+
+                    if (methodMatch) {
+                        matchedDates = methodMatch.availableDates;
+                    }
+                }
+
+                // If no matched dates, use common available dates
+                if (matchedDates.length === 0 && dateData.availableDates) {
+                    matchedDates = dateData.availableDates;
+                }
+
+                // If still no dates, generate default dates
+                if (matchedDates.length === 0) {
+                    const defaultDates = generateDefaultDates();
+                    matchedDates = defaultDates.map(date => ({
+                        display: date.toLocaleDateString('en-US', {
+                            month: '2-digit',
+                            day: '2-digit',
+                            year: 'numeric'
+                        }),
+                        iso: date.toISOString().split('T')[0],
+                        value: date.getTime()
+                    }));
+                }
+
+                // Create a shipping method entry with dates
+                shippingMethodsWithDates.push({
+                    method: methodName,
+                    code: methodId,
+                    totalCharges: methodCost,
+                    availableDates: matchedDates
+                });
+            }
+
+            // Create the final calendar data
+            const calendarData = {
+                methods: shippingMethodsWithDates,
+                allDates: dateData.availableDates || generateDefaultDates().map(date => ({
+                    display: date.toLocaleDateString('en-US', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        year: 'numeric'
+                    }),
+                    iso: date.toISOString().split('T')[0],
+                    value: date.getTime()
+                })),
+                dateFormat: "M/d/yyyy"
+            };
+
+            // Set the calendar data in state
+            setShippingCalendarData(calendarData);
+
+            return calendarData;
+        } catch (error) {
+            console.error('Error fetching shipping dates:', error);
+            // Create fallback calendar data with default dates
+            const defaultDates = generateDefaultDates();
+
+            const defaultCalendarData = {
+                methods: availableShippingOptions.map(option => ({
+                    method: option.description,
+                    code: option.id,
+                    totalCharges: option.cost,
+                    availableDates: defaultDates.map(date => ({
+                        display: date.toLocaleDateString('en-US', {
+                            month: '2-digit',
+                            day: '2-digit',
+                            year: 'numeric'
+                        }),
+                        iso: date.toISOString().split('T')[0],
+                        value: date.getTime()
+                    }))
+                })),
+                allDates: defaultDates.map(date => ({
+                    display: date.toLocaleDateString('en-US', {
+                        month: '2-digit',
+                        day: '2-digit',
+                        year: 'numeric'
+                    }),
+                    iso: date.toISOString().split('T')[0],
+                    value: date.getTime()
+                })),
+                dateFormat: "M/d/yyyy"
+            };
+
+            setShippingCalendarData(defaultCalendarData);
+            return defaultCalendarData;
+        } finally {
+            setIsLoadingDates(false);
+        }
+    };
+
     const refreshCheckoutTotals = async () => {
         setIsLoading(true);
         try {
@@ -1176,11 +1328,18 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 return;
             }
 
-            // Set shouldSaveAddress explicitly to ensure it's saved to the customer's address book
-            address.shouldSaveAddress = true;
+            // Check if customer is logged in (not a guest) before setting shouldSaveAddress
+            const checkout = getCheckout();
+            if (checkout && checkout.customer && checkout.customer.id !== 0) {
+                // Only set shouldSaveAddress to true for logged-in customers
+                address.shouldSaveAddress = true;
+            } else {
+                // For guest customers, don't save the address
+                address.shouldSaveAddress = false;
+            }
 
             // Create the customer address first using the service from useCheckout hook
-            if (createCustomerAddress) {
+            if (createCustomerAddress && address.shouldSaveAddress) {
                 try {
                     await createCustomerAddress(address);
                 } catch (error) {
@@ -2250,68 +2409,105 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         if (relevantConsignment.availableShippingOptions &&
                             relevantConsignment.availableShippingOptions.length > 0) {
 
-                            const fullShippingOption = relevantConsignment.availableShippingOptions.find(
-                                (option: { id: any; }) => option.id === relevantConsignment.selectedShippingOption.id
-                            );
+                            //calendar edits 
+                            try {
+                                // Fetch the calendar data for all shipping options
+                                await fetchAllShippingDates(
+                                    relevantConsignment.shippingAddress,
+                                    itemId,
+                                    relevantConsignment.availableShippingOptions
+                                );
 
-                            if (fullShippingOption) {
-                                setIsLoadingDates(true);
-                                try {
-                                    const fetchDatesPromise = fetchShippingDates(
-                                        relevantConsignment.shippingAddress,
-                                        itemId,
-                                        fullShippingOption.description
-                                    );
+                                await fetchCartData();
+                                const deliveryDate = getItemDeliveryDate(itemId);
 
-                                    const dates = await fetchDatesPromise;
+                                if (deliveryDate) {
+                                    try {
+                                        const dateParts = deliveryDate.split('/');
+                                        if (dateParts.length === 3) {
+                                            const month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed
+                                            const day = parseInt(dateParts[1]);
+                                            const year = parseInt(dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]);
 
-                                    setAvailableShippingDates(dates);
+                                            const dateObj = new Date(year, month, day);
 
-                                    // If there's a delivery date in the cart, try to select it
-                                    await fetchCartData();
-                                    const deliveryDate = getItemDeliveryDate(itemId);
-                                    if (deliveryDate) {
-                                        // Try to convert the string date to a Date object
-                                        try {
-                                            const dateParts = deliveryDate.split('/');
-                                            if (dateParts.length === 3) {
-                                                const month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed
-                                                const day = parseInt(dateParts[1]);
-                                                const year = parseInt(dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]);
-
-                                                const dateObj = new Date(year, month, day);
-                                                if (!isNaN(dateObj.getTime())) {
-                                                    // First try to find an exact match
-                                                    const exactMatch = dates.find(date =>
-                                                        date.getFullYear() === dateObj.getFullYear() &&
-                                                        date.getMonth() === dateObj.getMonth() &&
-                                                        date.getDate() === dateObj.getDate()
-                                                    );
-
-                                                    if (exactMatch) {
-                                                        setSelectedShippingDate(exactMatch);
-                                                    } else {
-                                                        // Fall back to closest date if no exact match
-                                                        const closestDate = dates.reduce((prev, curr) => {
-                                                            return (Math.abs(curr.getTime() - dateObj.getTime()) <
-                                                                Math.abs(prev.getTime() - dateObj.getTime()))
-                                                                ? curr : prev;
-                                                        });
-                                                        setSelectedShippingDate(closestDate);
-                                                    }
-                                                }
-
+                                            if (!isNaN(dateObj.getTime())) {
+                                                // Set the selected shipping date directly
+                                                setSelectedShippingDate(dateObj);
                                             }
                                         }
-                                        catch (error) {
-                                            console.error('Error parsing delivery date:', error);
-                                        }
+                                    } catch (error) {
+                                        console.error('Error parsing delivery date:', error);
                                     }
-                                } catch (error) {
-                                    console.error('Error fetching shipping dates:', error);
                                 }
 
+                            } catch (error) {
+                                console.error('Error fetching shipping calendar data:', error);
                             }
+
+                            // const fullShippingOption = relevantConsignment.availableShippingOptions.find(
+                            //     (option: { id: any; }) => option.id === relevantConsignment.selectedShippingOption.id
+                            // );
+
+
+                            // if (fullShippingOption) {
+                            //     setIsLoadingDates(true);
+                            //     try {
+                            //         const fetchDatesPromise = fetchShippingDates(
+                            //             relevantConsignment.shippingAddress,
+                            //             itemId,
+                            //             fullShippingOption.description
+                            //         );
+
+                            //         const dates = await fetchDatesPromise;
+
+                            //         setAvailableShippingDates(dates);
+
+                            //         // If there's a delivery date in the cart, try to select it
+                            //         await fetchCartData();
+                            //         const deliveryDate = getItemDeliveryDate(itemId);
+                            //         if (deliveryDate) {
+                            //             // Try to convert the string date to a Date object
+                            //             try {
+                            //                 const dateParts = deliveryDate.split('/');
+                            //                 if (dateParts.length === 3) {
+                            //                     const month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed
+                            //                     const day = parseInt(dateParts[1]);
+                            //                     const year = parseInt(dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]);
+
+                            //                     const dateObj = new Date(year, month, day);
+                            //                     if (!isNaN(dateObj.getTime())) {
+                            //                         // First try to find an exact match
+                            //                         const exactMatch = dates.find(date =>
+                            //                             date.getFullYear() === dateObj.getFullYear() &&
+                            //                             date.getMonth() === dateObj.getMonth() &&
+                            //                             date.getDate() === dateObj.getDate()
+                            //                         );
+
+                            //                         if (exactMatch) {
+                            //                             setSelectedShippingDate(exactMatch);
+                            //                         } else {
+                            //                             // Fall back to closest date if no exact match
+                            //                             const closestDate = dates.reduce((prev, curr) => {
+                            //                                 return (Math.abs(curr.getTime() - dateObj.getTime()) <
+                            //                                     Math.abs(prev.getTime() - dateObj.getTime()))
+                            //                                     ? curr : prev;
+                            //                             });
+                            //                             setSelectedShippingDate(closestDate);
+                            //                         }
+                            //                     }
+
+                            //                 }
+                            //             }
+                            //             catch (error) {
+                            //                 console.error('Error parsing delivery date:', error);
+                            //             }
+                            //         }
+                            //     } catch (error) {
+                            //         console.error('Error fetching shipping dates:', error);
+                            //     }
+
+                            // }
                         }
                     }
 
@@ -2410,6 +2606,246 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     if (!currentItem) {
         return <div>Loading...</div>;
     }
+
+    const handleDeliveryDateSubmit = async (shippingOption: any, deliveryDate: Date) => {
+        setIsDeliveryDateModalOpen(false);
+        setIsLoading(true);
+        
+        try {
+            // Set selections in state immediately
+            setSelectedShippingOption(shippingOption);
+            setSelectedShippingDate(deliveryDate);
+            
+            const currentConsignment = getCurrentConsignment();
+            const currentItem = getCurrentItem();
+            
+            if (!currentConsignment || !currentItem) {
+                throw new Error('Current consignment or item not found');
+            }
+            
+            const checkout = getCheckout();
+            if (!checkout) {
+                throw new Error('Checkout not available');
+            }
+            
+            // 1. Update shipping option if consignment exists
+            if (currentConsignment.id) {
+                await updateConsignmentShippingOption(currentConsignment.id, shippingOption.id);
+            }
+            
+            // 2. Format date as mm/dd/yyyy
+            const formattedDate = deliveryDate.toLocaleDateString('en-US', {
+                month: '2-digit',
+                day: '2-digit',
+                year: 'numeric'
+            });
+            
+            // 3. Get the option ID for Delivery Date
+            const modifierResponse = await fetch('https://bc-middleware-mm.onrender.com/cart/get-modifier', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    cartId: checkout.id,
+                    itemId: currentItem.id.toString()
+                })
+            });
+            
+            if (!modifierResponse.ok) {
+                throw new Error('Failed to get delivery date option ID');
+            }
+            
+            const modifierData = await modifierResponse.json();
+            const deliveryDateOptionId = modifierData.id;
+            
+            if (!deliveryDateOptionId) {
+                console.log('No delivery date option ID found');
+                return;
+            }
+            
+            // 4. Get current cart data for option selections
+            const cartResponse = await fetch('/api/storefront/carts?include=lineItems.physicalItems.options', {
+                method: 'GET',
+                headers: {
+                    Accept: 'application/json',
+                    'Content-Type': 'application/json'
+                }
+            });
+            
+            if (!cartResponse.ok) {
+                throw new Error('Failed to fetch cart data');
+            }
+            
+            const cartData = await cartResponse.json();
+            const cartItem = cartData[0]?.lineItems.physicalItems.find(
+                (item: { id: any; }) => item.id === currentItem.id
+            );
+            
+            if (!cartItem || !cartItem.options) {
+                throw new Error('Failed to retrieve item options');
+            }
+            
+            // 5. Build option selections preserving existing options
+            const optionSelections = cartItem.options.map((option: { nameId: any; value: any; valueId: any; }) => ({
+                optionId: option.nameId,
+                optionValue: option.valueId || option.value
+            }));
+            
+            // Find and update or add the delivery date option
+            const deliveryDateIndex = optionSelections.findIndex(
+                (option: { optionId: any; }) => option.optionId === deliveryDateOptionId
+            );
+            
+            if (deliveryDateIndex >= 0) {
+                optionSelections[deliveryDateIndex].optionValue = formattedDate;
+            } else {
+                optionSelections.push({
+                    optionId: deliveryDateOptionId,
+                    optionValue: formattedDate
+                });
+            }
+            
+            // 6. Update the cart item with delivery date
+            const updateResponse = await fetch(`/api/storefront/carts/${checkout.id}/items/${currentItem.id}`, {
+                method: 'PUT',
+                headers: {
+                    'Accept': 'application/json',
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify({
+                    lineItem: {
+                        productId: currentItem.productId,
+                        variantId: currentItem.variantId,
+                        quantity: currentItem.quantity,
+                        optionSelections: optionSelections
+                    }
+                })
+            });
+            
+            if (!updateResponse.ok) {
+                throw new Error('Failed to update delivery date');
+            }
+            
+            // 7. Update stored consignment only if already exists
+            if (currentConsignment.id) {
+                updateStoredConsignment(
+                    currentConsignment.id,
+                    currentItem.id,
+                    currentItem.quantity,
+                    currentConsignment.shippingAddress,
+                    shippingOption.id
+                );
+            }
+            
+            // 8. Update local state but DON'T mark as configured
+            const updatedItemConsignments = [...itemConsignments];
+            const currentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === currentItem.id);
+            
+            if (currentIndex >= 0) {
+                updatedItemConsignments[currentIndex] = {
+                    ...updatedItemConsignments[currentIndex],
+                    selectedShippingOption: shippingOption,
+                };
+                
+                setItemConsignments(updatedItemConsignments);
+            }
+            
+            // 9. Reload checkout and refresh totals
+            await loadCheckout();
+            await refreshCheckoutTotals();
+            await fetchCartData();
+            
+            // 10. IMPORTANT: Do NOT update configuredItems here
+            // This ensures the user still needs to press Continue
+            
+        } catch (error) {
+            console.error('Error updating shipping and delivery date:', error);
+            setError(error instanceof Error ? error.message : 'An unexpected error occurred');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const renderDatePickerInput = () => {
+        const formattedDate = selectedShippingDate
+            ? selectedShippingDate.toLocaleDateString('en-US', {
+                month: 'short',
+                day: 'numeric',
+                year: 'numeric'
+            })
+            : '';
+        const shippingDescription = (selectedShippingOption && selectedShippingOption.description) || '';
+
+        return (
+            <div className="form-field delivery-date-picker-field">
+                <label className="form-label">Estimated Delivery Date</label>
+                <div
+                    className="form-input date-picker-input"
+                    onClick={() => setIsDeliveryDateModalOpen(true)}
+                >
+                    <div className="date-picker-display">
+                        {shippingDescription + ' ' + formattedDate || 'Select a Est. Delivery Date'}
+                    </div>
+                    <span className="date-picker-icon">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
+                            <line x1="16" y1="2" x2="16" y2="6"></line>
+                            <line x1="8" y1="2" x2="8" y2="6"></line>
+                            <line x1="3" y1="10" x2="21" y2="10"></line>
+                        </svg>
+                    </span>
+                </div>
+            </div>
+        );
+    };
+
+    const renderShippingAndDeliverySection = () => {
+        if (!selectedAddress) {
+            return null;
+        }
+
+        return (<>{renderDatePickerInput()}</>)
+        // If we have selected a shipping option, show options and date picker
+        if (selectedShippingOption && shippingCalendarData) {
+            return (
+                <div className="tt-custom-shipping-options">
+                    <h4 className="optimizedCheckout-headingSecondary">
+                        Shipping Method
+                    </h4>
+
+                    <div className="selected-shipping-option">
+                        <div className="option-description">{selectedShippingOption.description}</div>
+                        <div className="option-cost">${selectedShippingOption.cost.toFixed(2)}</div>
+                        <Button
+                            onClick={() => setIsDeliveryDateModalOpen(true)}
+                            variant={ButtonVariant.Secondary}
+                            className="edit-shipping-btn"
+                        >
+                            Change
+                        </Button>
+                    </div>
+
+                    {/* Date picker input */}
+                    {renderDatePickerInput()}
+                </div>
+            );
+        }
+        //Because we have dependancy we're keeping this function
+        else if (false) {
+            return (
+                <div className="tt-custom-shipping-options">
+                    <h4 className="optimizedCheckout-headingSecondary">
+                        Shipping Method
+                    </h4>
+
+                    {/* Original renderShippingOptions content */}
+                    {renderShippingOptions()}
+                </div>
+            );
+        }
+
+    };
 
     const renderShippingOptions = () => {
         const currentConsignment = getCurrentConsignment();
@@ -2591,15 +3027,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         </div>
 
                         {/* Shipping Options */}
-                        {selectedAddress && (
-                            <div className="tt-custom-shipping-options">
-                                <h4 className="optimizedCheckout-headingSecondary">
-                                    Shipping Method
-                                </h4>
+                        {selectedAddress && renderShippingAndDeliverySection()}
 
-                                {renderShippingOptions()}
-                            </div>
-                        )}
 
                         {/* Error Alert */}
                         {error && (
@@ -2736,6 +3165,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             setIsEditGiftMessageModalOpen(false);
                             setEditedGiftMessage('');  // Clear the message when closing
                         }}
+                    />
+
+                    <DeliveryDateModal
+                        isOpen={isDeliveryDateModalOpen}
+                        isLoading={isLoading || isLoadingDates}
+                        calendarData={shippingCalendarData}
+                        selectedShippingOption={selectedShippingOption}
+                        selectedShippingDate={selectedShippingDate}
+                        onSubmit={handleDeliveryDateSubmit}
+                        onRequestClose={() => setIsDeliveryDateModalOpen(false)}
+                        isDatePickerMode={true} // Set this when opening from date picker
                     />
 
                     {/* Render all items in original order */}

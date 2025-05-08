@@ -1,4 +1,3 @@
-// Add this as a new component, perhaps in a file like GiftMessageModal.tsx
 import React, { FunctionComponent } from 'react';
 import { Button, ButtonVariant } from '../ui/button';
 import { Modal, ModalHeader } from '../ui/modal';
