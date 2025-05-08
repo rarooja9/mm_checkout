@@ -109,39 +109,44 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
 
     const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
     const firstDayOfMonth = getFirstDayOfMonth(selectedYear, selectedMonth);
-    
+
     const days = [];
-    
+
     // Empty cells for days before the first of the month
     for (let i = 0; i < firstDayOfMonth; i++) {
       days.push(<div key={`empty-${i}`} className="tt-day-empty"></div>);
     }
-    
+
     // Calendar days
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(selectedYear, selectedMonth, day);
       const methods = getMethodsForDate(date);
       const isToday = date.toDateString() === new Date().toDateString();
-      const isSelectedDate = selectedShippingDate && 
+      const isSelectedDate = selectedShippingDate &&
         date.getDate() === selectedShippingDate.getDate() &&
         date.getMonth() === selectedShippingDate.getMonth() &&
         date.getFullYear() === selectedShippingDate.getFullYear();
-      
+
       days.push(
-        <div 
-          key={day} 
+        <div
+          key={day}
           className={`tt-day ${isToday ? 'tt-day-today' : ''} ${isSelectedDate ? 'tt-day-selected' : ''}`}
           onClick={() => openMethodsModal(date)}
         >
           <div className="tt-day-header">
             <span className="tt-day-number">{day}</span>
-            {methods.length > 0 && (
-              <span className="tt-options-badge">
-                {methods.length} {methods.length === 1 ? 'option' : 'options'}
-              </span>
-            )}
           </div>
           <div className="tt-method-list">
+            {methods.length > 0 && (
+              <div className="tt-method-item" onClick={(e) => {
+                e.stopPropagation();
+                openMethodsModal(date);
+              }}>
+                {methods.length} {methods.length === 1 ? 'option available' : 'options available'}
+              </div>
+            )}
+          </div>
+          {/* <div className="tt-method-list">
             {methods.slice(0, 2).map((method: any, idx: any) => (
               <div 
                 key={idx} 
@@ -160,11 +165,11 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
                 +{methods.length - 2} more...
               </div>
             )}
-          </div>
+          </div> */}
         </div>
       );
     }
-     
+
     return days;
   };
 
@@ -172,7 +177,7 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
     <div className="shipping-calendar-container">
       <div className="tt-header">
         <div className="tt-title-container">
-          <h3 className="tt-title">Select Delivery Date</h3>
+          <h3 className="tt-title">Select Estimated Delivery Date</h3>
         </div>
         <div className="tt-nav">
           <button
@@ -196,7 +201,7 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
           </button>
         </div>
       </div>
-      
+
       <div className="tt-weekdays">
         {['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'].map(day => (
           <div key={day} className="tt-weekday">
@@ -204,20 +209,20 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
           </div>
         ))}
       </div>
-      
+
       <div className="tt-grid">
         {renderCalendar()}
       </div>
-      
+
       {selectedShippingOption && selectedShippingDate && (
         <div className="selected-shipping-container">
           <div className="selected-shipping-info">
             <div>
-              <div className="selected-shipping-label">Selected Shipping Method:</div>
+              <div className="selected-shipping-label">Selected Delivery Method:</div>
               <div className="selected-shipping-value">{selectedShippingOption.description} - ${selectedShippingOption.cost.toFixed(2)}</div>
             </div>
             <div>
-              <div className="selected-shipping-label">Delivery Date:</div>
+              <div className="selected-shipping-label">Selected Estimated Delivery Date:</div>
               <div className="selected-shipping-value">
                 {selectedShippingDate.toLocaleDateString('en-US', {
                   month: 'short',
@@ -229,14 +234,14 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
           </div>
         </div>
       )}
-      
+
       {/* Modal for showing shipping methods */}
       {showModal && (
         <div className="tt-modal-overlay">
           <div className="tt-modal">
             <div className="tt-modal-header">
               <h3 className="tt-modal-title">
-                Shipping Methods for {selectedDateString}
+               {selectedDateString} Estimated Delivery Options
               </h3>
               <button
                 onClick={() => setShowModal(false)}
@@ -250,11 +255,10 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
             </div>
             <div className="tt-modal-body">
               {selectedDayMethods.map((method, idx) => (
-                <div 
-                  key={idx} 
-                  className={`tt-method-card ${
-                    selectedShippingOption && method.code === selectedShippingOption.id ? 'tt-method-card-selected' : ''
-                  }`}
+                <div
+                  key={idx}
+                  className={`tt-method-card ${selectedShippingOption && method.code === selectedShippingOption.id ? 'tt-method-card-selected' : ''
+                    }`}
                   onClick={() => handleMethodSelect(method)}
                 >
                   <div className="tt-method-card-header">

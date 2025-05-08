@@ -1,4 +1,3 @@
-// DeliveryDateModal.tsx
 import React, { FunctionComponent, useEffect, useState } from 'react';
 import { Button, ButtonVariant } from '../ui/button';
 import { Modal } from '../ui/modal';
@@ -28,7 +27,7 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
     const [selectedOption, setSelectedOption] = useState(initialShippingOption);
     const [selectedDate, setSelectedDate] = useState(initialShippingDate);
 
-
+    // Update local state when props change
     useEffect(() => {
         if (isOpen) {
             setSelectedOption(initialShippingOption);
@@ -51,6 +50,11 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
         }
     };
 
+    // Prevent clicks inside the modal content from closing the modal
+    const handleModalContentClick = (e: React.MouseEvent) => {
+        e.stopPropagation();
+    };
+
     const isSubmitDisabled = !selectedOption || !selectedDate || isLoading;
 
     return (
@@ -61,37 +65,45 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
             shouldShowCloseButton={true}
         >
             <LoadingOverlay isLoading={isLoading}>
-                <form onSubmit={handleSubmit}>
-                    <div className="form-field">
-                        {calendarData ? (
-                            <ShippingCalendarSelector
-                                calendarData={calendarData}
-                                onSelectShippingOption={handleShippingOptionSelect}
-                                onSelectDeliveryDate={handleDeliveryDateSelect}
-                                selectedShippingOption={selectedOption}
-                                selectedShippingDate={selectedDate}
-                                isLoading={isLoading} // Use the parent isLoading prop instead
-                            />
-                        ) : (
-                            <div className="loading-placeholder">Loading delivery options...</div>
-                        )}
-                    </div>
-                    <div className="form-actions">
-                        <Button
-                            onClick={onRequestClose}
-                            variant={ButtonVariant.Secondary}
-                        >
-                            Cancel
-                        </Button>
-                        <Button
-                            type="submit"
-                            variant={ButtonVariant.Primary}
-                            disabled={isSubmitDisabled}
-                        >
-                            Confirm Selection
-                        </Button>
-                    </div>
-                </form>
+                {/* Add onClick handler to prevent click propagation */}
+                <div onClick={handleModalContentClick}>
+                    <form onSubmit={handleSubmit}>
+                        <div className="form-field">
+                            {calendarData ? (
+                                <ShippingCalendarSelector
+                                    calendarData={calendarData}
+                                    onSelectShippingOption={handleShippingOptionSelect}
+                                    onSelectDeliveryDate={handleDeliveryDateSelect}
+                                    selectedShippingOption={selectedOption}
+                                    selectedShippingDate={selectedDate}
+                                    isLoading={isLoading}
+                                />
+                            ) : (
+                                <div className="loading-placeholder">Loading delivery options...</div>
+                            )}
+                        </div>
+                        <div className="form-actions">
+                            <Button
+                                onClick={(e) => {
+                                    e.stopPropagation(); // Prevent event propagation
+                                    onRequestClose();
+                                }}
+                                variant={ButtonVariant.Secondary}
+                                type="button" // Explicitly set type to button
+                            >
+                                Cancel
+                            </Button>
+                            <Button
+                                type="submit"
+                                variant={ButtonVariant.Primary}
+                                disabled={isSubmitDisabled}
+                                onClick={(e) => e.stopPropagation()} // Prevent event propagation
+                            >
+                                Confirm Selection
+                            </Button>
+                        </div>
+                    </form>
+                </div>
             </LoadingOverlay>
         </Modal>
     );

@@ -2610,36 +2610,36 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const handleDeliveryDateSubmit = async (shippingOption: any, deliveryDate: Date) => {
         setIsDeliveryDateModalOpen(false);
         setIsLoading(true);
-        
+
         try {
             // Set selections in state immediately
             setSelectedShippingOption(shippingOption);
             setSelectedShippingDate(deliveryDate);
-            
+
             const currentConsignment = getCurrentConsignment();
             const currentItem = getCurrentItem();
-            
+
             if (!currentConsignment || !currentItem) {
                 throw new Error('Current consignment or item not found');
             }
-            
+
             const checkout = getCheckout();
             if (!checkout) {
                 throw new Error('Checkout not available');
             }
-            
+
             // 1. Update shipping option if consignment exists
             if (currentConsignment.id) {
                 await updateConsignmentShippingOption(currentConsignment.id, shippingOption.id);
             }
-            
+
             // 2. Format date as mm/dd/yyyy
             const formattedDate = deliveryDate.toLocaleDateString('en-US', {
                 month: '2-digit',
                 day: '2-digit',
                 year: 'numeric'
             });
-            
+
             // 3. Get the option ID for Delivery Date
             const modifierResponse = await fetch('https://bc-middleware-mm.onrender.com/cart/get-modifier', {
                 method: 'POST',
@@ -2651,19 +2651,19 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     itemId: currentItem.id.toString()
                 })
             });
-            
+
             if (!modifierResponse.ok) {
                 throw new Error('Failed to get delivery date option ID');
             }
-            
+
             const modifierData = await modifierResponse.json();
             const deliveryDateOptionId = modifierData.id;
-            
+
             if (!deliveryDateOptionId) {
                 console.log('No delivery date option ID found');
                 return;
             }
-            
+
             // 4. Get current cart data for option selections
             const cartResponse = await fetch('/api/storefront/carts?include=lineItems.physicalItems.options', {
                 method: 'GET',
@@ -2672,31 +2672,31 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     'Content-Type': 'application/json'
                 }
             });
-            
+
             if (!cartResponse.ok) {
                 throw new Error('Failed to fetch cart data');
             }
-            
+
             const cartData = await cartResponse.json();
             const cartItem = cartData[0]?.lineItems.physicalItems.find(
                 (item: { id: any; }) => item.id === currentItem.id
             );
-            
+
             if (!cartItem || !cartItem.options) {
                 throw new Error('Failed to retrieve item options');
             }
-            
+
             // 5. Build option selections preserving existing options
             const optionSelections = cartItem.options.map((option: { nameId: any; value: any; valueId: any; }) => ({
                 optionId: option.nameId,
                 optionValue: option.valueId || option.value
             }));
-            
+
             // Find and update or add the delivery date option
             const deliveryDateIndex = optionSelections.findIndex(
                 (option: { optionId: any; }) => option.optionId === deliveryDateOptionId
             );
-            
+
             if (deliveryDateIndex >= 0) {
                 optionSelections[deliveryDateIndex].optionValue = formattedDate;
             } else {
@@ -2705,7 +2705,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     optionValue: formattedDate
                 });
             }
-            
+
             // 6. Update the cart item with delivery date
             const updateResponse = await fetch(`/api/storefront/carts/${checkout.id}/items/${currentItem.id}`, {
                 method: 'PUT',
@@ -2722,11 +2722,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     }
                 })
             });
-            
+
             if (!updateResponse.ok) {
                 throw new Error('Failed to update delivery date');
             }
-            
+
             // 7. Update stored consignment only if already exists
             if (currentConsignment.id) {
                 updateStoredConsignment(
@@ -2737,28 +2737,28 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     shippingOption.id
                 );
             }
-            
+
             // 8. Update local state but DON'T mark as configured
             const updatedItemConsignments = [...itemConsignments];
             const currentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === currentItem.id);
-            
+
             if (currentIndex >= 0) {
                 updatedItemConsignments[currentIndex] = {
                     ...updatedItemConsignments[currentIndex],
                     selectedShippingOption: shippingOption,
                 };
-                
+
                 setItemConsignments(updatedItemConsignments);
             }
-            
+
             // 9. Reload checkout and refresh totals
             await loadCheckout();
             await refreshCheckoutTotals();
             await fetchCartData();
-            
+
             // 10. IMPORTANT: Do NOT update configuredItems here
             // This ensures the user still needs to press Continue
-            
+
         } catch (error) {
             console.error('Error updating shipping and delivery date:', error);
             setError(error instanceof Error ? error.message : 'An unexpected error occurred');
@@ -2777,6 +2777,15 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             : '';
         const shippingDescription = (selectedShippingOption && selectedShippingOption.description) || '';
 
+        let inputPlaceholder = '';
+        if (shippingDescription && formattedDate) {
+            console.log('11')
+            inputPlaceholder = shippingDescription + ' ' + formattedDate
+        }
+        else {
+            inputPlaceholder = 'Select a Estimated Delivery Date'
+        }
+
         return (
             <div className="form-field delivery-date-picker-field">
                 <label className="form-label">Estimated Delivery Date</label>
@@ -2785,7 +2794,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     onClick={() => setIsDeliveryDateModalOpen(true)}
                 >
                     <div className="date-picker-display">
-                        {shippingDescription + ' ' + formattedDate || 'Select a Est. Delivery Date'}
+                        {inputPlaceholder}
                     </div>
                     <span className="date-picker-icon">
                         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -3089,7 +3098,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                         {getItemDeliveryDate(item.id) && (
                             <div className="tt-custom-item-delivery-date">
-                                <span className="tt-custom-delivery-date-label">Delivery Date:</span>
+                                <span className="tt-custom-delivery-date-label">Estimated Delivery Date:</span>
                                 <span className="tt-custom-delivery-date-value">{getItemDeliveryDate(item.id)}</span>
                             </div>
                         )}
