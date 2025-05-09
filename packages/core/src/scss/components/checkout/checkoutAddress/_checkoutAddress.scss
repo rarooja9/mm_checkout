@@ -317,6 +317,42 @@
   overflow: hidden !important;
 }
 
+/* CSS for Skip Gift Message Button */
+.skip-gift-message-btn {
+  background-color: #f5f5f5;
+  border: 1px solid #ddd;
+  color: #333;
+  transition: all 0.2s ease;
+}
+
+.skip-gift-message-btn:hover {
+  background-color: #e5e5e5;
+  border-color: #ccc;
+}
+
+/* Fix for checkbox in BigCommerce checkout */
+.form-checkbox input[type="checkbox"] {
+  display: inline-block;
+  width: auto;
+  height: auto;
+  margin-right: 10px;
+  visibility: visible;
+  opacity: 1;
+  position: static;
+}
+
+.form-checkbox label {
+  display: inline-block;
+  vertical-align: middle;
+}
+
+/* Ensure the modal has adequate spacing */
+.gift-message-popup .modal-body {
+  padding: 20px;
+}
+
+//Delivery date styles- old 
+
 .tt-delivery-date-picker {
   width: 100%;
 }

@@ -1006,7 +1006,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         // Fetch delivery dates in parallel for all available shipping methods
                         if (newConsignment.availableShippingOptions && newConsignment.availableShippingOptions.length > 0) {
                             // Get delivery dates for the current item and address
-                            await fetchAllShippingDates(address, currentItem.id, newConsignment.availableShippingOptions);
+                            await fetchAllShippingDates(address, currentItem.id, currentItem.quantity, newConsignment.availableShippingOptions);
                         }
 
                         // Load the checkout to ensure UI is in sync
@@ -1028,6 +1028,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const fetchAllShippingDates = async (
         address: Address,
         lineItemId: string | number,
+        quantity: string | number,
         availableShippingOptions: any[]
     ) => {
         try {
@@ -1040,7 +1041,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             const requestBody = {
                 cartId: checkout.id,
                 itemId: lineItemId.toString(),
-                quantity: 1,
+                quantity: quantity || 1,
                 shippingMethod: "",
                 address: {
                     country: address.countryCode,
@@ -1068,6 +1069,14 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             // Create a map of shipping methods with their available dates
             const shippingMethodsWithDates = [];
 
+            // Store the first method's dates as fallback
+            let fallbackDates: string | any[] = [];
+            if (dateData.methods && dateData.methods.length > 0) {
+                fallbackDates = dateData.methods[0].availableDates;
+            } else if (dateData.availableDates && dateData.availableDates.length > 0) {
+                fallbackDates = dateData.availableDates;
+            }
+
             // Process each available shipping option
             for (const option of availableShippingOptions) {
                 const methodName = option.description;
@@ -1093,18 +1102,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     matchedDates = dateData.availableDates;
                 }
 
-                // If still no dates, generate default dates
-                if (matchedDates.length === 0) {
-                    const defaultDates = generateDefaultDates();
-                    matchedDates = defaultDates.map(date => ({
-                        display: date.toLocaleDateString('en-US', {
-                            month: '2-digit',
-                            day: '2-digit',
-                            year: 'numeric'
-                        }),
-                        iso: date.toISOString().split('T')[0],
-                        value: date.getTime()
-                    }));
+                // If still no dates, use fallback dates from first method
+                if (matchedDates.length === 0 && fallbackDates.length > 0) {
+                    matchedDates = fallbackDates;
                 }
 
                 // Create a shipping method entry with dates
@@ -1119,15 +1119,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             // Create the final calendar data
             const calendarData = {
                 methods: shippingMethodsWithDates,
-                allDates: dateData.availableDates || generateDefaultDates().map(date => ({
-                    display: date.toLocaleDateString('en-US', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        year: 'numeric'
-                    }),
-                    iso: date.toISOString().split('T')[0],
-                    value: date.getTime()
-                })),
+                allDates: dateData.availableDates || fallbackDates,
                 dateFormat: "M/d/yyyy"
             };
 
@@ -1137,25 +1129,52 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             return calendarData;
         } catch (error) {
             console.error('Error fetching shipping dates:', error);
-            // Create fallback calendar data with default dates
-            const defaultDates = generateDefaultDates();
 
-            const defaultCalendarData = {
-                methods: availableShippingOptions.map(option => ({
-                    method: option.description,
-                    code: option.id,
-                    totalCharges: option.cost,
-                    availableDates: defaultDates.map(date => ({
-                        display: date.toLocaleDateString('en-US', {
-                            month: '2-digit',
-                            day: '2-digit',
-                            year: 'numeric'
-                        }),
-                        iso: date.toISOString().split('T')[0],
-                        value: date.getTime()
-                    }))
-                })),
-                allDates: defaultDates.map(date => ({
+            // Create fallback calendar data with dates from first method if possible
+            let fallbackDates = [];
+
+            try {
+                const checkout = getCheckout();
+                if (checkout) {
+                    const requestBody = {
+                        cartId: checkout.id,
+                        itemId: lineItemId.toString(),
+                        quantity: 1,
+                        shippingMethod: "",
+                        address: {
+                            country: address.countryCode,
+                            region: address.stateOrProvinceCode,
+                            city: address.city,
+                            zipcode: address.postalCode
+                        }
+                    };
+
+                    const response = await fetch('https://bc-middleware-mm.onrender.com/get-dates', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify(requestBody)
+                    });
+
+                    if (response.ok) {
+                        const basicDateData = await response.json();
+                        if (basicDateData.methods && basicDateData.methods.length > 0) {
+                            fallbackDates = basicDateData.methods[0].availableDates;
+                        } else if (basicDateData.availableDates) {
+                            fallbackDates = basicDateData.availableDates;
+                        }
+                    }
+                }
+            } catch (fallbackError) {
+                console.error('Error getting fallback dates:', fallbackError);
+            }
+
+            // If we still don't have dates, then as last resort use default dates
+            if (fallbackDates.length === 0) {
+                // Create default dates as a last resort
+                const defaultDates = generateDefaultDates();
+                fallbackDates = defaultDates.map(date => ({
                     display: date.toLocaleDateString('en-US', {
                         month: '2-digit',
                         day: '2-digit',
@@ -1163,7 +1182,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     }),
                     iso: date.toISOString().split('T')[0],
                     value: date.getTime()
+                }));
+            }
+
+            const defaultCalendarData = {
+                methods: availableShippingOptions.map(option => ({
+                    method: option.description,
+                    code: option.id,
+                    totalCharges: option.cost,
+                    availableDates: fallbackDates
                 })),
+                allDates: fallbackDates,
                 dateFormat: "M/d/yyyy"
             };
 
@@ -1230,6 +1259,15 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         const currentItem = getCurrentItem();
         if (currentItem && !hasValidDeliveryDate(currentItem.id)) {
             setError('Please provide a delivery date');
+            return;
+        }
+
+        // New validation for gift message
+        const hasGiftMessage = currentItem?.giftWrapping && currentItem.giftWrapping.message;
+        const isGiftMessageEmpty = !hasGiftMessage;
+
+        if (isGiftMessageEmpty) {
+            setError('Please add/skip the gift message by clicking the "Add Gift Message" button');
             return;
         }
 
@@ -2415,6 +2453,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                 await fetchAllShippingDates(
                                     relevantConsignment.shippingAddress,
                                     itemId,
+                                    physicalItems[index].quantity,
                                     relevantConsignment.availableShippingOptions
                                 );
 
@@ -2779,7 +2818,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
         let inputPlaceholder = '';
         if (shippingDescription && formattedDate) {
-            console.log('11')
             inputPlaceholder = shippingDescription + ' ' + formattedDate
         }
         else {
@@ -2937,7 +2975,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             item.quantity > 1 &&
             (!consignment || !consignment.id);
 
-        const hasGiftMessage = item.giftWrapping && item.giftWrapping.message;
+        const hasGiftMessage = item.giftWrapping && item.giftWrapping.message && item.giftWrapping.message!='_';
         const showAddGiftMessageButton = !hasGiftMessage && !showSplitButton;
 
         return (
