@@ -164,48 +164,57 @@ class Shipping extends Component<ShippingProps & WithCheckoutShippingProps, Ship
         if (isCustomShipping) {
             if (isGuest) {
                 return (
-                    <MultiShippingGuestForm onCreateAccount={this.props.onCreateAccount}  onSignIn={this.props.onSignIn} />
+                    <>
+                        {/* <ShippingHeader
+                            cartHasPromotionalItems={cartHasPromotionalItems}
+                            isGuest={isGuest}
+                            isMultiShippingMode={isMultiShippingMode}
+                            onMultiShippingChange={this.handleMultiShippingModeSwitch}
+                            shouldShowMultiShipping={shouldShowMultiShipping}
+                        /> */}
+                        <MultiShippingGuestForm onCreateAccount={this.props.onCreateAccount} onSignIn={this.props.onSignIn} />
+                    </>
                 );
             }
-            return <CustomShipping 
-              isBillingSameAsShipping={this.props.isBillingSameAsShipping}
-              cartHasChanged={this.props.cartHasChanged}
-              isMultiShippingMode={this.props.isMultiShippingMode}
-              step={this.props.step}
-              navigateNextStep={this.props.navigateNextStep}
-              onCreateAccount={this.props.onCreateAccount}
-              onReady={this.props.onReady}
-              onSignIn={this.props.onSignIn}
-              onToggleMultiShipping={this.props.onToggleMultiShipping} 
-              onUnhandledError={this.props.onUnhandledError}
-              cart={this.props.cart}
-              consignments={this.props.consignments}
-              customer={this.props.customer}
-              countries={this.props.countries}
-              shippingAddress={this.props.shippingAddress}
-              //updateShippingAddress={this.props.updateShippingAddress}
-              assignItem={this.props.assignItem}
-              getFields={this.props.getFields}
-              loadShippingOptions={this.props.loadShippingOptions}
-              deleteConsignments={this.props.deleteConsignments}
+            return <CustomShipping
+                isBillingSameAsShipping={this.props.isBillingSameAsShipping}
+                cartHasChanged={this.props.cartHasChanged}
+                isMultiShippingMode={this.props.isMultiShippingMode}
+                step={this.props.step}
+                navigateNextStep={this.props.navigateNextStep}
+                onCreateAccount={this.props.onCreateAccount}
+                onReady={this.props.onReady}
+                onSignIn={this.props.onSignIn}
+                onToggleMultiShipping={this.props.onToggleMultiShipping}
+                onUnhandledError={this.props.onUnhandledError}
+                cart={this.props.cart}
+                consignments={this.props.consignments}
+                customer={this.props.customer}
+                countries={this.props.countries}
+                shippingAddress={this.props.shippingAddress}
+                //updateShippingAddress={this.props.updateShippingAddress}
+                assignItem={this.props.assignItem}
+                getFields={this.props.getFields}
+                loadShippingOptions={this.props.loadShippingOptions}
+                deleteConsignments={this.props.deleteConsignments}
             />;
-          }
+        }
 
         if (shouldRenderStripeForm && !customer.email && this.props.countries.length > 0) {
             return <StripeShipping
-                { ...shippingFormProps }
-                customer={ customer }
+                {...shippingFormProps}
+                customer={customer}
                 deinitialize={deinitializeShippingMethod}
                 initialize={initializeShippingMethod}
                 isBillingSameAsShipping={isBillingSameAsShipping}
-                isGuest={ isGuest }
+                isGuest={isGuest}
                 isInitialValueLoaded={shouldRenderWhileLoading ? !isInitializing : true}
-                isLoading={ isInitializing }
+                isLoading={isInitializing}
                 isMultiShippingMode={isMultiShippingMode}
-                isShippingMethodLoading={ this.props.isLoading }
-                onMultiShippingChange={ this.handleMultiShippingModeSwitch }
+                isShippingMethodLoading={this.props.isLoading}
+                onMultiShippingChange={this.handleMultiShippingModeSwitch}
                 onSubmit={this.handleSingleShippingSubmit}
-                shouldShowMultiShipping={ shouldShowMultiShipping }
+                shouldShowMultiShipping={shouldShowMultiShipping}
                 step={step}
                 updateAddress={updateShippingAddress}
             />;
@@ -214,7 +223,7 @@ class Shipping extends Component<ShippingProps & WithCheckoutShippingProps, Ship
         return (
             <AddressFormSkeleton isLoading={isInitializing} renderWhileLoading={shouldRenderWhileLoading}>
                 <div className="checkout-form">
-                    <ConfirmationModal 
+                    <ConfirmationModal
                         action={handleSwitchToSingleShipping}
                         actionButtonLabel={<TranslatedString id="common.ok_action" />}
                         headerId="shipping.multishipping_unavailable_action"

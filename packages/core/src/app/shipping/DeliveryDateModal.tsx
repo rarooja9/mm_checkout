@@ -8,6 +8,8 @@ interface DeliveryDateModalProps {
     isOpen: boolean;
     isLoading: boolean;
     calendarData: any;
+    currentConsignment: any;
+    product: any;
     selectedShippingOption: any;
     selectedShippingDate: Date | null;
     isDatePickerMode?: boolean;
@@ -19,6 +21,8 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
     isOpen,
     isLoading,
     calendarData,
+    currentConsignment,
+    product,
     selectedShippingOption: initialShippingOption,
     selectedShippingDate: initialShippingDate,
     onSubmit,
@@ -69,18 +73,16 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
                 <div onClick={handleModalContentClick}>
                     <form onSubmit={handleSubmit}>
                         <div className="form-field">
-                            {calendarData ? (
                                 <ShippingCalendarSelector
                                     calendarData={calendarData}
+                                    currentConsignment={currentConsignment}
+                                    product={product}
                                     onSelectShippingOption={handleShippingOptionSelect}
                                     onSelectDeliveryDate={handleDeliveryDateSelect}
                                     selectedShippingOption={selectedOption}
                                     selectedShippingDate={selectedDate}
                                     isLoading={isLoading}
                                 />
-                            ) : (
-                                <div className="loading-placeholder">Loading delivery options...</div>
-                            )}
                         </div>
                         <div className="form-actions">
                             <Button
@@ -89,7 +91,7 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
                                     onRequestClose();
                                 }}
                                 variant={ButtonVariant.Secondary}
-                                type="button" // Explicitly set type to button
+                                type="button"
                             >
                                 Cancel
                             </Button>

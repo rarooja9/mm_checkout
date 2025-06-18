@@ -1,22 +1,23 @@
-import React, { useState } from 'react';
-// import { Calendar, ChevronLeft, ChevronRight, X } from 'lucide-react';
-// import { Button, ButtonVariant } from '../ui/button';
+import React, { useState, useEffect } from 'react';
 
 interface ShippingCalendarSelectorProps {
-  calendarData: any;
   onSelectShippingOption: (option: any) => void;
   onSelectDeliveryDate: (date: Date) => void;
+  calendarData: any;
   selectedShippingOption: any;
+  currentConsignment: any;
+  product: any;
   selectedShippingDate: Date | null;
   isLoading: boolean;
 }
 
 const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
-  calendarData,
   onSelectShippingOption,
   onSelectDeliveryDate,
   selectedShippingOption,
   selectedShippingDate,
+  currentConsignment,
+  product,
   isLoading
 }) => {
   const [selectedMonth, setSelectedMonth] = useState<number>(new Date().getMonth());
@@ -25,7 +26,24 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
   const [selectedDayMethods, setSelectedDayMethods] = useState<any[]>([]);
   const [selectedDateString, setSelectedDateString] = useState<string>("");
   const [selectedDayObject, setSelectedDayObject] = useState<Date | null>(null);
+  const [loadingMethods, setLoadingMethods] = useState<boolean>(false);
+  const [methodsCache, setMethodsCache] = useState<Map<string, any[]>>(new Map());
+  const [availableDates, setAvailableDates] = useState<Date[]>([]);
 
+  // Initialize available dates (75 days from now)
+  useEffect(() => {
+    const dates: Date[] = [];
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    for (let i = 0; i < 75; i++) {
+      const date = new Date(today);
+      date.setDate(today.getDate() + i);
+      dates.push(date);
+    }
+    setLoadingMethods(false);
+    setAvailableDates(dates);
+  }, []);
 
   const getDaysInMonth = (year: number, month: number) => {
     return new Date(year, month + 1, 0).getDate();
@@ -35,22 +53,149 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
     return new Date(year, month, 1).getDay();
   };
 
-  const getMethodsForDate = (date: Date) => {
-    if (!calendarData) return [];
-
-    const dateString = date.toISOString().split('T')[0];
-
-    return calendarData.methods.filter((method: any) =>
-      method.availableDates.some((availableDate: any) =>
-        availableDate.iso === dateString
-      )
-    );
+  const isDateAvailable = (date: Date) => {
+    const dateString = date.toDateString();
+    return availableDates.some(availableDate => availableDate.toDateString() === dateString);
   };
 
-  const openMethodsModal = (date: Date) => {
-    const methods = getMethodsForDate(date);
-    if (methods.length > 0) {
-      setSelectedDayMethods(methods);
+  const getCachedMethods = (date: Date): any[] | undefined => {
+    const dateKey = date.toISOString().split('T')[0];
+    return methodsCache.get(dateKey);
+  };
+
+  const onLoadMethods = async (date: Date) => {
+    try {
+      // Format date as MM/DD/YYYY
+      const formattedDate = `${String(date.getMonth() + 1).padStart(2, '0')}/${String(date.getDate()).padStart(2, '0')}/${date.getFullYear()}`;
+
+      // Get shipping address from currentConsignment
+      const shippingAddress = currentConsignment?.shippingAddress;
+      if (!shippingAddress) {
+        throw new Error('No shipping address found');
+      }
+
+      // Try to get product options from session storage first
+      let productOptions = sessionStorage.getItem(product.productId);
+      let parsedOptions = productOptions ? JSON.parse(productOptions) : null;
+
+      // If not in session, fetch from API
+      if (!parsedOptions) {
+        const optionsResponse = await fetch('https://bc-middleware-mm.onrender.com/cart/get-options', {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            itemId: [product.productId]
+          })
+        });
+
+        if (!optionsResponse.ok) {
+          throw new Error('Failed to fetch product options');
+        }
+
+        const optionsData = await optionsResponse.json();
+        parsedOptions = optionsData[product.productId] || {};
+
+        // Store in session for future use
+        sessionStorage.setItem(product.productId, JSON.stringify(parsedOptions));
+      }
+
+      // Build the request body
+      const requestBody = {
+        ratingInfo: {
+          requestedOptions: {
+            selectedDate: formattedDate
+          },
+          cart: {
+            items: [
+              {
+                itemId: String(product.productId),
+                sku: product.sku,
+                weight: parsedOptions.weight || product.weight || 0,
+                qty: product.quantity || 1,
+                type: "SIMPLE",
+                attributes: [
+                  {
+                    name: "shipperhq_shipping_group",
+                    value: parsedOptions.shippingGroup ? parsedOptions.shippingGroup.join(',') : ""
+                  },
+                  {
+                    name: "shipperhq_shipping_fee",
+                    value: String(parsedOptions.shippingRate || 0)
+                  }
+                ]
+              }
+            ]
+          },
+          destination: {
+            country: shippingAddress.countryCode || "US",
+            region: shippingAddress.stateOrProvinceCode || shippingAddress.stateOrProvince,
+            city: shippingAddress.city,
+            zipcode: shippingAddress.postalCode,
+            street: shippingAddress.address1
+          },
+          customer: {
+            customerGroup: "Retail"
+          },
+          cartType: "STD"
+        }
+      };
+
+      const response = await fetch('https://bc-middleware-mm.onrender.com/get-methods', {
+        method: 'POST',
+        headers: {
+          'Accept': 'application/json',
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify(requestBody)
+      });
+
+      if (!response.ok) {
+        throw new Error(`Failed to fetch shipping methods: ${response.status}`);
+      }
+
+      const methodsData = await response.json();
+
+      // Get available shipping options from currentConsignment
+      const availableOptions = currentConsignment?.availableShippingOptions || [];
+
+      // Match and filter methods based on availableShippingOptions
+      const filteredMethods = availableOptions.map((option: any) => {
+        // Find matching method from API response using flexible string matching
+        const matchingMethod = methodsData.find((method: any) => {
+          const optionDesc = option.description.toLowerCase();
+          const methodTitle = method.methodTitle.toLowerCase();
+
+          return optionDesc.includes(methodTitle) || methodTitle.includes(optionDesc);
+        });
+
+        // Return the available option enhanced with delivery dates
+        return {
+          code: option.id,
+          method: option.description,
+          totalCharges: option.cost,
+          deliveryDate: matchingMethod?.deliveryDate || null,
+          dispatchDate: matchingMethod?.dispatchDate || null,
+          isRecommended: option.isRecommended || false
+        };
+      }).filter((method: any) => method.deliveryDate !== null); // Only include methods that have matching delivery dates
+
+      return filteredMethods;
+
+    } catch (error) {
+      console.error('Error loading shipping methods:', error);
+      return [];
+    }
+  }
+
+  const handleLoadMethods = async (date: Date) => {
+    const cachedMethods = getCachedMethods(date);
+
+    if (cachedMethods) {
+      // If we have cached methods, show them immediately
+      setSelectedDayMethods(cachedMethods);
       setSelectedDateString(date.toLocaleDateString('en-US', {
         month: 'short',
         day: 'numeric',
@@ -58,10 +203,37 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
       }));
       setSelectedDayObject(date);
       setShowModal(true);
+      return;
+    }
+
+    // Otherwise, load methods
+    setLoadingMethods(true);
+    setSelectedDateString(date.toLocaleDateString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric'
+    }));
+    setSelectedDayObject(date);
+    setShowModal(true);
+
+    try {
+      const methods = await onLoadMethods(date);
+      setSelectedDayMethods(methods);
+
+      // Cache the methods
+      const dateKey = date.toISOString().split('T')[0];
+      setMethodsCache(prev => new Map(prev).set(dateKey, methods));
+    } catch (error) {
+      console.error('Error loading methods:', error);
+      setSelectedDayMethods([]);
+    } finally {
+      setLoadingMethods(false);
     }
   };
 
-  const handlePrevMonth = () => {
+  const handlePrevMonth = (e: React.MouseEvent) => {
+    e.stopPropagation();
+
     setSelectedMonth(prevMonth => {
       if (prevMonth === 0) {
         setSelectedYear(prevYear => prevYear - 1);
@@ -71,7 +243,9 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
     });
   };
 
-  const handleNextMonth = () => {
+  const handleNextMonth = (e: React.MouseEvent) => {
+    e.stopPropagation();
+
     setSelectedMonth(prevMonth => {
       if (prevMonth === 11) {
         setSelectedYear(prevYear => prevYear + 1);
@@ -85,12 +259,13 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
     const option = {
       id: method.code,
       description: method.method,
-      cost: method.totalCharges
+      cost: method.totalCharges,
+      deliveryDate: method.deliveryDate,
+      dispatchDate: method.dispatchDate
     };
 
     onSelectShippingOption(option);
 
-    // If we have a selected day, select that date
     if (selectedDayObject) {
       onSelectDeliveryDate(selectedDayObject);
     }
@@ -120,52 +295,50 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
     // Calendar days
     for (let day = 1; day <= daysInMonth; day++) {
       const date = new Date(selectedYear, selectedMonth, day);
-      const methods = getMethodsForDate(date);
+      const isAvailable = isDateAvailable(date);
       const isToday = date.toDateString() === new Date().toDateString();
       const isSelectedDate = selectedShippingDate &&
         date.getDate() === selectedShippingDate.getDate() &&
         date.getMonth() === selectedShippingDate.getMonth() &&
         date.getFullYear() === selectedShippingDate.getFullYear();
+      const cachedMethods = getCachedMethods(date);
 
       days.push(
         <div
           key={day}
-          className={`tt-day ${isToday ? 'tt-day-today' : ''} ${isSelectedDate ? 'tt-day-selected' : ''}`}
-          onClick={() => openMethodsModal(date)}
+          className={`tt-day ${isToday ? 'tt-day-today' : ''} ${isSelectedDate ? 'tt-day-selected' : ''} ${!isAvailable ? 'tt-day-disabled' : ''}`}
         >
           <div className="tt-day-header">
             <span className="tt-day-number">{day}</span>
           </div>
           <div className="tt-method-list">
-            {methods.length > 0 && (
-              <div className="tt-method-item" onClick={(e) => {
-                e.stopPropagation();
-                openMethodsModal(date);
-              }}>
-                {methods.length} {methods.length === 1 ? 'option available' : 'options available'}
+            {isAvailable && (
+              <div className="tt-method-item">
+                {cachedMethods ? (
+                  <span
+                    className="tt-cached-methods"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleLoadMethods(date);
+                    }}
+                  >
+                    {cachedMethods.length} {cachedMethods.length === 1 ? 'option' : 'options'}
+                  </span>
+                ) : (
+                  <button
+                    className="tt-load-methods-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleLoadMethods(date);
+                    }}
+                    type="button"
+                  >
+                    Load Methods
+                  </button>
+                )}
               </div>
             )}
           </div>
-          {/* <div className="tt-method-list">
-            {methods.slice(0, 2).map((method: any, idx: any) => (
-              <div 
-                key={idx} 
-                className="tt-method-item"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  // Open modal instead of directly selecting the method
-                  openMethodsModal(date);
-                }}
-              >
-                {method.method}
-              </div>
-            ))}
-            {methods.length > 2 && (
-              <div className="tt-more-options">
-                +{methods.length - 2} more...
-              </div>
-            )}
-          </div> */}
         </div>
       );
     }
@@ -183,6 +356,7 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
           <button
             onClick={handlePrevMonth}
             className="tt-nav-button"
+            type="button"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="15 18 9 12 15 6"></polyline>
@@ -194,6 +368,7 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
           <button
             onClick={handleNextMonth}
             className="tt-nav-button"
+            type="button"
           >
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <polyline points="9 18 15 12 9 6"></polyline>
@@ -237,15 +412,16 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
 
       {/* Modal for showing shipping methods */}
       {showModal && (
-        <div className="tt-modal-overlay">
-          <div className="tt-modal">
+        <div className="tt-modal-overlay" onClick={() => setShowModal(false)}>
+          <div className="tt-modal" onClick={(e) => e.stopPropagation()}>
             <div className="tt-modal-header">
               <h3 className="tt-modal-title">
-               {selectedDateString} Estimated Delivery Options
+                {selectedDateString} Estimated Delivery Options
               </h3>
               <button
                 onClick={() => setShowModal(false)}
                 className="tt-close-button"
+                type="button"
               >
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                   <line x1="18" y1="6" x2="6" y2="18"></line>
@@ -254,35 +430,32 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
               </button>
             </div>
             <div className="tt-modal-body">
-              {selectedDayMethods.map((method, idx) => (
-                <div
-                  key={idx}
-                  className={`tt-method-card ${selectedShippingOption && method.code === selectedShippingOption.id ? 'tt-method-card-selected' : ''
-                    }`}
-                  onClick={() => handleMethodSelect(method)}
-                >
-                  <div className="tt-method-card-header">
-                    <span className="tt-method-name">{method.method}</span>
-                    <span className="tt-method-price">
-                      ${method.totalCharges.toFixed(2)}
-                    </span>
-                  </div>
+              {loadingMethods ? (
+                <div className="tt-loading-methods">
+                  <div className="tt-spinner"></div>
+                  <p>Loading delivery methods...</p>
                 </div>
-              ))}
-            </div>
-            <div className="tt-modal-footer">
-              <button
-                onClick={() => setShowModal(false)}
-                className="tt-button tt-button-secondary"
-              >
-                CANCEL
-              </button>
-              <button
-                onClick={() => setShowModal(false)}
-                className="tt-button tt-button-primary"
-              >
-                CONFIRM SELECTION
-              </button>
+              ) : selectedDayMethods.length > 0 ? (
+                selectedDayMethods.map((method, idx) => (
+                  <div
+                    key={idx}
+                    className={`tt-method-card ${selectedShippingOption && method.code === selectedShippingOption.id ? 'tt-method-card-selected' : ''
+                      }`}
+                    onClick={() => handleMethodSelect(method)}
+                  >
+                    <div className="tt-method-card-header">
+                      <span className="tt-method-name">{method.method}</span>
+                      <span className="tt-method-price">
+                        ${method.totalCharges.toFixed(2)}
+                      </span>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="tt-no-methods">
+                  <p>No delivery methods available for this date.</p>
+                </div>
+              )}
             </div>
           </div>
         </div>
