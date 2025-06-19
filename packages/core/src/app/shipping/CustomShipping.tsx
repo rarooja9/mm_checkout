@@ -304,7 +304,25 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         return deliveryDateOption.value && deliveryDateOption.value.trim() !== '';
     };
 
+    const getItemDeliveryDate = async (itemId: string | number): Promise<string | null> => {
+        let cartItem: any;
+        if (cartItems && cartItems.length === 0) {
+            const items = await fetchPhysicalItems();
+            cartItem = items.find((item: any) => item.id == itemId);
+        } else {
+            cartItem = cartItems.find(item => item.id == itemId);
+        }
 
+        if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
+            return null;
+        }
+
+        const deliveryDateOption = cartItem.options.find((option: any) =>
+            option.name === "Delivery Date" || option.name.includes("Delivery Date")
+        );
+
+        return deliveryDateOption?.value || null;
+    };
 
 
     const clearDeliveryDateForItem = async (checkoutId: string, lineItemId: { toString: () => any; }) => {
@@ -415,192 +433,20 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     // First initialization - only remove consignments that have multiple items
     // Initialize consignments and split items if needed
 
-   useEffect(() => {
-    const initConsignments = async () => {
-        if (physicalItems.length > 0) {
-            setIsInitializing(true);
-            setIsLoading(true);
-            try {
-                // Combined fetch for cart and checkout data
-                const checkout = getCheckout();
-                if (!checkout) {
-                    return;
-                }
-
-                // PARALLEL FETCH: Cart data and checkout data simultaneously
-                const [cartItemsWithOptions, checkoutResponse] = await Promise.all([
-                    fetchCartData(),
-                    fetch(
-                        `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions,cart.lineItems.physicalItems.options`,
-                        {
-                            method: 'GET',
-                            headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
-                        }
-                    )
-                ]);
-
-                if (!checkoutResponse.ok) {
-                    throw new Error('Failed to fetch checkout data');
-                }
-
-                const checkoutData = await checkoutResponse.json();
-
-                const itemOrder = physicalItems.map(item => item.id.toString());
-                setOriginalItemOrder(itemOrder);
-
-                let currentConsignments = checkoutData.consignments || [];
-
-                // Helper function to validate consignment for delivery
-                const isConsignmentValidForDelivery = (consignment: { selectedShippingOption: any; lineItemIds: any; }) => {
-                    if (!consignment.selectedShippingOption) {
-                        return false;
+    useEffect(() => {
+        const initConsignments = async () => {
+            if (physicalItems.length > 0) {
+                setIsInitializing(true);
+                setIsLoading(true);
+                try {
+                    // Combined fetch for cart and checkout data
+                    const checkout = getCheckout();
+                    if (!checkout) {
+                        return;
                     }
 
-                    const lineItemIds = Array.isArray(consignment.lineItemIds)
-                        ? consignment.lineItemIds
-                        : [consignment.lineItemIds];
-
-                    return lineItemIds.every((lineItemId: string | number) => {
-                        const cartItem = cartItemsWithOptions.find((item: any) => item.id == lineItemId);
-
-                        if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
-                            return false;
-                        }
-
-                        const deliveryDateOption = cartItem.options.find((option: any) =>
-                            option.name === "Delivery Date" || option.name.includes("Delivery Date")
-                        );
-
-                        if (!deliveryDateOption) {
-                            return true;
-                        }
-
-                        if (!deliveryDateOption.value || deliveryDateOption.value.trim() === '') {
-                            return false;
-                        }
-
-                        try {
-                            const currentDate = new Date();
-                            const itemDeliveryDate = new Date(deliveryDateOption.value);
-                            return itemDeliveryDate > currentDate;
-                        } catch (error) {
-                            return false;
-                        }
-                    });
-                };
-
-                // Find consignments with multiple items
-                const multiItemConsignments = currentConsignments.filter(
-                    (consignment: { lineItemIds: string | any[]; }) => consignment.lineItemIds && consignment.lineItemIds.length > 1
-                );
-
-                // Process multi-item consignments to preserve configured items
-                if (multiItemConsignments.length > 0) {
-                    console.log('Found multi-item consignments, processing...');
-
-                    // Track which items need restoration
-                    const itemsToRestore: { lineItemId: string; storedConsignment: any }[] = [];
-
-                    // OPTIMIZATION: Batch process multi-item consignments
-                    for (const multiConsignment of multiItemConsignments) {
-                        const lineItemIds = Array.isArray(multiConsignment.lineItemIds)
-                            ? multiConsignment.lineItemIds
-                            : [multiConsignment.lineItemIds];
-
-                        // Check each item in the multi-item consignment
-                        for (const lineItemId of lineItemIds) {
-                            const physicalItem = physicalItems.find(
-                                item => item.id.toString() === lineItemId.toString()
-                            );
-
-                            if (physicalItem) {
-                                // Check if this item has a stored consignment
-                                const storedConsignment = findStoredConsignmentByLineItemId(
-                                    lineItemId,
-                                    physicalItem.quantity
-                                );
-
-                                // If we have a stored consignment with shipping option, mark it for restoration
-                                if (storedConsignment?.selectedShippingOptionId) {
-                                    itemsToRestore.push({ lineItemId, storedConsignment });
-                                }
-                            }
-                        }
-
-                        // Delete the multi-item consignment
-                        const deleteOptions = {
-                            method: 'DELETE',
-                            headers: {
-                                'Accept': 'application/json'
-                            }
-                        };
-
-                        await fetch(`/api/storefront/checkouts/${checkout.id}/consignments/${multiConsignment.id}`, deleteOptions);
-
-                        // Remove the stored consignment for the multi-item consignment
-                        if (multiConsignment.id) {
-                            removeStoredConsignment(multiConsignment.id);
-                        }
-                    }
-
-                    // After deleting multi-item consignments, reload checkout
-                    await loadCheckout();
-
-                    // OPTIMIZATION: Create all consignments in parallel
-                    const consignmentCreationPromises = itemsToRestore.map(async ({ lineItemId, storedConsignment }) => {
-                        try {
-                            // Create a new consignment for this item
-                            const createResult = await createConsignment(
-                                storedConsignment.shippingAddress,
-                                lineItemId,
-                                storedConsignment.quantity
-                            );
-
-                            // Find the newly created consignment
-                            const newConsignments = createResult.consignments || [];
-                            const newConsignment = newConsignments.find((c: any) =>
-                                c.lineItemIds.includes(lineItemId.toString())
-                            );
-
-                            return { lineItemId, storedConsignment, newConsignment };
-                        } catch (error) {
-                            console.error(`Error creating consignment for item ${lineItemId}:`, error);
-                            return null;
-                        }
-                    });
-
-                    const createdConsignments = await Promise.all(consignmentCreationPromises);
-
-                    // OPTIMIZATION: Update shipping options in parallel
-                    const shippingUpdatePromises = createdConsignments
-                        .filter(result => result && result.newConsignment && result.storedConsignment.selectedShippingOptionId)
-                        .map(async (result) => {
-                            try {
-                                await updateConsignmentShippingOption(
-                                    result!.newConsignment.id,
-                                    result!.storedConsignment.selectedShippingOptionId
-                                );
-
-                                // Update the stored consignment with new ID
-                                updateStoredConsignment(
-                                    result!.newConsignment.id,
-                                    result!.lineItemId,
-                                    result!.storedConsignment.quantity,
-                                    result!.storedConsignment.shippingAddress,
-                                    result!.storedConsignment.selectedShippingOptionId
-                                );
-                            } catch (error) {
-                                console.error(`Error updating shipping option for item ${result!.lineItemId}:`, error);
-                            }
-                        });
-
-                    await Promise.all(shippingUpdatePromises);
-
-                    // Reload checkout after restorations
-                    await loadCheckout();
-
-                    // Get updated consignments
-                    const updatedCheckoutResponse = await fetch(
+                    // SINGLE FETCH: Get all data in one request
+                    const checkoutResponse = await fetch(
                         `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions,cart.lineItems.physicalItems.options`,
                         {
                             method: 'GET',
@@ -608,174 +454,346 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         }
                     );
 
-                    if (updatedCheckoutResponse.ok) {
-                        const updatedCheckoutData = await updatedCheckoutResponse.json();
-                        currentConsignments = updatedCheckoutData.consignments || [];
+                    if (!checkoutResponse.ok) {
+                        throw new Error('Failed to fetch checkout data');
                     }
-                }
 
-                // OPTIMIZATION: Process single-item consignments in parallel
-                const singleItemRestorationPromises = physicalItems.map(async (item) => {
-                    const physicalItem = physicalItems.find(
-                        physItem => physItem.id.toString() === item.id.toString()
-                    );
+                    const checkoutData = await checkoutResponse.json();
 
-                    const itemQuantity = physicalItem ? physicalItem.quantity : 1;
-                    const existingConsignment = currentConsignments.find((c: { lineItemIds: string | any[]; }) =>
-                        c.lineItemIds.length === 1 &&
-                        c.lineItemIds[0] === item.id.toString()
-                    );
+                    // Extract cart items from checkout response (avoiding separate fetchCartData call)
+                    const cartItemsWithOptions = checkoutData.cart?.lineItems?.physicalItems || [];
+                    setCartItems(cartItemsWithOptions);
 
-                    if (existingConsignment && !existingConsignment.selectedShippingOption) {
-                        const storedConsignment = findStoredConsignmentByLineItemId(
-                            item.id,
-                            itemQuantity
-                        );
+                    const itemOrder = physicalItems.map(item => item.id.toString());
+                    setOriginalItemOrder(itemOrder);
 
-                        if (storedConsignment?.selectedShippingOptionId) {
-                            try {
-                                await restoreConsignment(storedConsignment);
-                            } catch (restoreError) {
-                                console.error(`Error restoring consignment for item ${item.id}:`, restoreError);
-                            }
+                    let currentConsignments = checkoutData.consignments || [];
+
+                    // Helper function to validate consignment for delivery
+                    const isConsignmentValidForDelivery = (consignment: { selectedShippingOption: any; lineItemIds: any; }) => {
+                        if (!consignment.selectedShippingOption) {
+                            return false;
                         }
-                    }
-                });
 
-                await Promise.all(singleItemRestorationPromises);
-
-                // Validate and remove invalid consignments
-                const consignmentsToRemove = currentConsignments.filter((consignment: any) => {
-                    return !isConsignmentValidForDelivery(consignment);
-                });
-
-                if (consignmentsToRemove.length > 0) {
-                    // OPTIMIZATION: Clear delivery dates in parallel
-                    const clearDeliveryPromises = [];
-                    for (const consignment of consignmentsToRemove) {
                         const lineItemIds = Array.isArray(consignment.lineItemIds)
                             ? consignment.lineItemIds
                             : [consignment.lineItemIds];
-                        
-                        for (const lineItemId of lineItemIds) {
-                            clearDeliveryPromises.push(clearDeliveryDateForItem(checkout.id, lineItemId));
+
+                        return lineItemIds.every((lineItemId: string | number) => {
+                            const cartItem = cartItemsWithOptions.find((item: any) => item.id == lineItemId);
+
+                            if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
+                                return false;
+                            }
+
+                            const deliveryDateOption = cartItem.options.find((option: any) =>
+                                option.name === "Delivery Date" || option.name.includes("Delivery Date")
+                            );
+
+                            if (!deliveryDateOption) {
+                                return true;
+                            }
+
+                            if (!deliveryDateOption.value || deliveryDateOption.value.trim() === '') {
+                                return false;
+                            }
+
+                            try {
+                                const currentDate = new Date();
+                                const itemDeliveryDate = new Date(deliveryDateOption.value);
+                                return itemDeliveryDate > currentDate;
+                            } catch (error) {
+                                return false;
+                            }
+                        });
+                    };
+
+                    // Find consignments with multiple items
+                    const multiItemConsignments = currentConsignments.filter(
+                        (consignment: { lineItemIds: string | any[]; }) => consignment.lineItemIds && consignment.lineItemIds.length > 1
+                    );
+
+                    // Process multi-item consignments to preserve configured items
+                    if (multiItemConsignments.length > 0) {
+                        console.log('Found multi-item consignments, processing...');
+
+                        // Track which items need restoration
+                        const itemsToRestore: { lineItemId: string; storedConsignment: any }[] = [];
+
+                        // OPTIMIZATION: Batch process multi-item consignments
+                        for (const multiConsignment of multiItemConsignments) {
+                            const lineItemIds = Array.isArray(multiConsignment.lineItemIds)
+                                ? multiConsignment.lineItemIds
+                                : [multiConsignment.lineItemIds];
+
+                            // Check each item in the multi-item consignment
+                            for (const lineItemId of lineItemIds) {
+                                const physicalItem = physicalItems.find(
+                                    item => item.id.toString() === lineItemId.toString()
+                                );
+
+                                if (physicalItem) {
+                                    // Check if this item has a stored consignment
+                                    const storedConsignment = findStoredConsignmentByLineItemId(
+                                        lineItemId,
+                                        physicalItem.quantity
+                                    );
+
+                                    // If we have a stored consignment with shipping option, mark it for restoration
+                                    if (storedConsignment?.selectedShippingOptionId) {
+                                        itemsToRestore.push({ lineItemId, storedConsignment });
+                                    }
+                                }
+                            }
+
+                            // Delete the multi-item consignment
+                            const deleteOptions = {
+                                method: 'DELETE',
+                                headers: {
+                                    'Accept': 'application/json'
+                                }
+                            };
+
+                            await fetch(`/api/storefront/checkouts/${checkout.id}/consignments/${multiConsignment.id}`, deleteOptions);
+
+                            // Remove the stored consignment for the multi-item consignment
+                            if (multiConsignment.id) {
+                                removeStoredConsignment(multiConsignment.id);
+                            }
+                        }
+
+
+                        // OPTIMIZATION: Create all consignments in parallel
+                        const consignmentCreationPromises = itemsToRestore.map(async ({ lineItemId, storedConsignment }) => {
+                            try {
+                                // Create a new consignment for this item
+                                const createResult = await createConsignment(
+                                    storedConsignment.shippingAddress,
+                                    lineItemId,
+                                    storedConsignment.quantity
+                                );
+
+                                // Find the newly created consignment
+                                const newConsignments = createResult.consignments || [];
+                                const newConsignment = newConsignments.find((c: any) =>
+                                    c.lineItemIds.includes(lineItemId.toString())
+                                );
+
+                                return { lineItemId, storedConsignment, newConsignment };
+                            } catch (error) {
+                                console.error(`Error creating consignment for item ${lineItemId}:`, error);
+                                return null;
+                            }
+                        });
+
+                        const createdConsignments = await Promise.all(consignmentCreationPromises);
+
+                        // OPTIMIZATION: Update shipping options in parallel
+                        const shippingUpdatePromises = createdConsignments
+                            .filter(result => result && result.newConsignment && result.storedConsignment.selectedShippingOptionId)
+                            .map(async (result) => {
+                                try {
+                                    await updateConsignmentShippingOption(
+                                        result!.newConsignment.id,
+                                        result!.storedConsignment.selectedShippingOptionId
+                                    );
+
+                                    // Update the stored consignment with new ID
+                                    updateStoredConsignment(
+                                        result!.newConsignment.id,
+                                        result!.lineItemId,
+                                        result!.storedConsignment.quantity,
+                                        result!.storedConsignment.shippingAddress,
+                                        result!.storedConsignment.selectedShippingOptionId
+                                    );
+                                } catch (error) {
+                                    console.error(`Error updating shipping option for item ${result!.lineItemId}:`, error);
+                                }
+                            });
+
+                        await Promise.all(shippingUpdatePromises);
+
+                        // Get updated consignments
+                        const updatedCheckoutResponse = await fetch(
+                            `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions,cart.lineItems.physicalItems.options`,
+                            {
+                                method: 'GET',
+                                headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
+                            }
+                        );
+
+                        if (updatedCheckoutResponse.ok) {
+                            const updatedCheckoutData = await updatedCheckoutResponse.json();
+                            currentConsignments = updatedCheckoutData.consignments || [];
                         }
                     }
-                    
-                    await Promise.all(clearDeliveryPromises);
 
-                    // OPTIMIZATION: Delete consignments in parallel
-                    const deletePromises = consignmentsToRemove.map(async (consignment: any) => {
-                        const options = {
-                            method: 'DELETE',
-                            headers: {
-                                'Accept': 'application/json'
+                    // OPTIMIZATION: Process single-item consignments in parallel
+                    const singleItemRestorationPromises = physicalItems.map(async (item) => {
+                        const physicalItem = physicalItems.find(
+                            physItem => physItem.id.toString() === item.id.toString()
+                        );
+
+                        const itemQuantity = physicalItem ? physicalItem.quantity : 1;
+                        const existingConsignment = currentConsignments.find((c: { lineItemIds: string | any[]; }) =>
+                            c.lineItemIds.length === 1 &&
+                            c.lineItemIds[0] === item.id.toString()
+                        );
+
+                        if (existingConsignment && !existingConsignment.selectedShippingOption) {
+                            const storedConsignment = findStoredConsignmentByLineItemId(
+                                item.id,
+                                itemQuantity
+                            );
+
+                            if (storedConsignment?.selectedShippingOptionId) {
+                                try {
+                                    await restoreConsignment(storedConsignment);
+                                } catch (restoreError) {
+                                    console.error(`Error restoring consignment for item ${item.id}:`, restoreError);
+                                }
                             }
-                        };
-
-                        await fetch(`/api/storefront/checkouts/${checkout.id}/consignments/${consignment.id}`, options);
-
-                        if (consignment.id) {
-                            removeStoredConsignment(consignment.id);
                         }
                     });
 
-                    await Promise.all(deletePromises);
-                    await loadCheckout();
-                }
+                    await Promise.all(singleItemRestorationPromises);
 
-                // Get final consignments state
-                const finalCheckoutResponse = await fetch(
-                    `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions,cart.lineItems.physicalItems.options`,
-                    {
-                        method: 'GET',
-                        headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
+                    // Validate and remove invalid consignments
+                    const consignmentsToRemove = currentConsignments.filter((consignment: any) => {
+                        return !isConsignmentValidForDelivery(consignment);
+                    });
+
+                    if (consignmentsToRemove.length > 0) {
+                        // OPTIMIZATION: Clear delivery dates in parallel
+                        const clearDeliveryPromises = [];
+                        for (const consignment of consignmentsToRemove) {
+                            const lineItemIds = Array.isArray(consignment.lineItemIds)
+                                ? consignment.lineItemIds
+                                : [consignment.lineItemIds];
+
+                            for (const lineItemId of lineItemIds) {
+                                clearDeliveryPromises.push(clearDeliveryDateForItem(checkout.id, lineItemId));
+                            }
+                        }
+
+                        await Promise.all(clearDeliveryPromises);
+
+                        // OPTIMIZATION: Delete consignments in parallel
+                        const deletePromises = consignmentsToRemove.map(async (consignment: any) => {
+                            const options = {
+                                method: 'DELETE',
+                                headers: {
+                                    'Accept': 'application/json'
+                                }
+                            };
+
+                            await fetch(`/api/storefront/checkouts/${checkout.id}/consignments/${consignment.id}`, options);
+
+                            if (consignment.id) {
+                                removeStoredConsignment(consignment.id);
+                            }
+                        });
+
+                        await Promise.all(deletePromises);
                     }
-                );
 
-                let finalConsignments = [];
-                if (finalCheckoutResponse.ok) {
-                    const finalCheckoutData = await finalCheckoutResponse.json();
-                    finalConsignments = finalCheckoutData.consignments || [];
-                }
-
-                // Initialize consignments for all items
-                const initialConsignments = physicalItems.map(item => {
-                    const existingConsignment = finalConsignments.find(
-                        (c: any) => c.lineItemIds.includes(item.id.toString())
+                    // Get final consignments state
+                    const finalCheckoutResponse = await fetch(
+                        `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions,cart.lineItems.physicalItems.options`,
+                        {
+                            method: 'GET',
+                            headers: { Accept: 'application/json', 'Content-Type': 'application/json' }
+                        }
                     );
 
-                    if (existingConsignment && existingConsignment.selectedShippingOption) {
+                    let finalConsignments = [];
+                    if (finalCheckoutResponse.ok) {
+                        const finalCheckoutData = await finalCheckoutResponse.json();
+                        finalConsignments = finalCheckoutData.consignments || [];
+                    }
+
+                    // Initialize consignments for all items
+                    const initialConsignments = physicalItems.map(item => {
+                        const existingConsignment = finalConsignments.find(
+                            (c: any) => c.lineItemIds.includes(item.id.toString())
+                        );
+
+                        if (existingConsignment && existingConsignment.selectedShippingOption) {
+                            return {
+                                id: existingConsignment.id,
+                                lineItemId: item.id as string,
+                                shippingAddress: existingConsignment.shippingAddress,
+                                selectedShippingOption: existingConsignment.selectedShippingOption,
+                                availableShippingOptions: existingConsignment.availableShippingOptions || [],
+                            };
+                        }
+
                         return {
-                            id: existingConsignment.id,
                             lineItemId: item.id as string,
-                            shippingAddress: existingConsignment.shippingAddress,
-                            selectedShippingOption: existingConsignment.selectedShippingOption,
-                            availableShippingOptions: existingConsignment.availableShippingOptions || [],
+                            shippingAddress: null,
+                            selectedShippingOption: null,
+                            availableShippingOptions: [],
                         };
+                    });
+
+                    setItemConsignments(initialConsignments);
+
+                    // Set up configured items map
+                    const configuredItemsMap: { [key: string]: boolean } = {};
+
+                    // OPTIMIZATION: Check all configurations in parallel
+                    const configurationPromises = initialConsignments.map((consignment) => {
+                        const hasAddressAndShipping = Boolean(
+                            consignment.shippingAddress && consignment.selectedShippingOption
+                        );
+
+                        // Get delivery date directly from physicalItems options
+                        const physicalItem = physicalItems.find(item => item.id.toString() === consignment.lineItemId.toString());
+                        const hasValidDeliveryDateValue = physicalItem?.options?.some((option: any) =>
+                            (option.name === "Delivery Date" || option.name.includes("Delivery Date")) &&
+                            option.value && option.value.trim() !== ''
+                        ) ?? true;
+
+                        return {
+                            lineItemId: consignment.lineItemId,
+                            isConfigured: hasAddressAndShipping && hasValidDeliveryDateValue
+                        };
+                    });
+
+                    const configurationResults = configurationPromises; // No need for Promise.all since it's synchronous now
+                    configurationResults.forEach(result => {
+                        configuredItemsMap[result.lineItemId] = result.isConfigured;
+                    });
+
+                    setConfiguredItems(configuredItemsMap);
+
+                    // Set current item index to the first unconfigured item
+                    const firstUnconfiguredIndex = physicalItems.findIndex(
+                        item => !configuredItemsMap[item.id]
+                    );
+                    setCurrentItemIndex(firstUnconfiguredIndex >= 0 ? firstUnconfiguredIndex : 0);
+
+                    // If starting with an unconfigured item, clear selections
+                    if (firstUnconfiguredIndex >= 0) {
+                        setSelectedAddress(null);
+                        setSelectedShippingOption(null);
                     }
 
-                    return {
-                        lineItemId: item.id as string,
-                        shippingAddress: null,
-                        selectedShippingOption: null,
-                        availableShippingOptions: [],
-                    };
-                });
-
-                setItemConsignments(initialConsignments);
-
-                // Set up configured items map
-                const configuredItemsMap: { [key: string]: boolean } = {};
-
-                // OPTIMIZATION: Check all configurations in parallel
-                const configurationPromises = initialConsignments.map(async (consignment) => {
-                    const hasAddressAndShipping = Boolean(
-                        consignment.shippingAddress && consignment.selectedShippingOption
-                    );
-
-                    const hasValidDeliveryDateValue = await hasValidOptionValue(consignment.lineItemId, "Delivery Date");
-
-                    return {
-                        lineItemId: consignment.lineItemId,
-                        isConfigured: hasAddressAndShipping && hasValidDeliveryDateValue
-                    };
-                });
-
-                const configurationResults = await Promise.all(configurationPromises);
-                configurationResults.forEach(result => {
-                    configuredItemsMap[result.lineItemId] = result.isConfigured;
-                });
-
-                setConfiguredItems(configuredItemsMap);
-
-                // Set current item index to the first unconfigured item
-                const firstUnconfiguredIndex = physicalItems.findIndex(
-                    item => !configuredItemsMap[item.id]
-                );
-                setCurrentItemIndex(firstUnconfiguredIndex >= 0 ? firstUnconfiguredIndex : 0);
-
-                // If starting with an unconfigured item, clear selections
-                if (firstUnconfiguredIndex >= 0) {
-                    setSelectedAddress(null);
-                    setSelectedShippingOption(null);
+                } catch (err) {
+                    if (err instanceof Error) {
+                        setError(`Error initializing: ${err.message}`);
+                    }
+                } finally {
+                    setTimeout(() => {
+                        setIsLoading(false);
+                        setIsInitializing(false);
+                    }, 100);
                 }
-
-            } catch (err) {
-                if (err instanceof Error) {
-                    setError(`Error initializing: ${err.message}`);
-                }
-            } finally {
-                setTimeout(() => {
-                    setIsLoading(false);
-                    setIsInitializing(false);
-                }, 100);
             }
-        }
-    };
+        };
 
-    initConsignments();
-}, []);
+        initConsignments();
+    }, []);
 
     // Load shipping options for current item when item index changes
     useEffect(() => {
@@ -788,9 +806,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
             setIsLoading(true);
             try {
-                // Load the latest checkout data
-                await loadCheckout();
-
                 const currentItem = getCurrentItem();
                 if (!currentItem) return;
 
@@ -813,8 +828,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         setSelectedAddress(updatedConsignment.shippingAddress);
                         setSelectedShippingOption(updatedConsignment.selectedShippingOption);
 
-                        await fetchCartData(); // Ensure cart data is loaded
-                        const deliveryDate = getItemDeliveryDate(currentItem.id);
+                        const deliveryDate = await getItemDeliveryDate(currentItem.id);
 
                         if (deliveryDate) {
                             try {
@@ -899,6 +913,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     }, [onReady]);
 
     // Check if all items are configured
+    // Replace the existing useEffect with this updated version:
+
     useEffect(() => {
         const checkAllItemsConfigured = async () => {
             if (physicalItems.length === 0) {
@@ -912,8 +928,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     // Check if the item has a shipping address and shipping option
                     const isBasicConfigured = Boolean(configuredItems[item.id]);
 
-                    // Check if the item has a valid delivery date
-                    const hasDeliveryDate = await hasValidOptionValue(item.id, "Delivery Date");
+                    // Check if the item has a valid delivery date using localStorage
+                    const hasDeliveryDate = checkDeliveryDateFromLocalStorage(item.id);
 
                     // Item is fully configured only if both conditions are met
                     return isBasicConfigured && hasDeliveryDate;
@@ -926,7 +942,36 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         };
 
         checkAllItemsConfigured();
-    }, [physicalItems, configuredItems, cartItems]);
+    }, [physicalItems, configuredItems]);
+
+    // Add this helper function to check delivery date from localStorage:
+    const checkDeliveryDateFromLocalStorage = (itemId: string | number): boolean => {
+        try {
+            const itemDataString = localStorage.getItem(itemId.toString());
+
+            if (!itemDataString) {
+                return false; // No data in localStorage
+            }
+
+            const itemData = JSON.parse(itemDataString);
+
+            // Check if deliveryDate exists and is not empty
+            if (!itemData.deliveryDate || itemData.deliveryDate.trim() === '') {
+                return false;
+            }
+
+            // Optional: Also check if the delivery date is in the future
+            const deliveryDate = new Date(itemData.deliveryDate);
+            const currentDate = new Date();
+
+            // Return true if delivery date is valid and in the future
+            return !isNaN(deliveryDate.getTime()) && deliveryDate > currentDate;
+
+        } catch (error) {
+            console.error('Error parsing localStorage data for item:', itemId, error);
+            return false;
+        }
+    };
 
     const getCurrentItem = () => {
         return physicalItems[currentItemIndex];
@@ -1269,17 +1314,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             }
 
             // Force a complete refresh of checkout data to update shipping totals
-            const options = {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'Cache-Control': 'no-cache, no-store'
-                }
-            };
+            // const options = {
+            //     method: 'GET',
+            //     headers: {
+            //         'Accept': 'application/json',
+            //         'Cache-Control': 'no-cache, no-store'
+            //     }
+            // };
 
             // This direct API call forces BigCommerce to recalculate all shipping totals
             // but does NOT auto-select shipping options
-            await fetch(`/api/storefront/checkouts/${checkout.id}?include=cart.lineItems.physicalItems.options,consignments.availableShippingOptions`, options);
+            // await fetch(`/api/storefront/checkouts/${checkout.id}?include=cart.lineItems.physicalItems.options,consignments.availableShippingOptions`, options);
 
             // Reload checkout to sync UI with the latest state
             await loadCheckout();
@@ -1360,19 +1405,23 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 throw new Error('Product options not found');
             }
 
-            // 4. Build option selections preserving existing options
+            // 4. Build current option selections map for easy comparison
             const currentOptions = cartItem.options || [];
+            const currentOptionsMap = new Map();
+            currentOptions.forEach((option: { nameId: any; value: any; valueId: any; }) => {
+                currentOptionsMap.set(option.nameId, option.valueId || option.value);
+            });
+
+            // 5. Build new option selections preserving existing options
             const optionSelections = currentOptions.map((option: { nameId: any; value: any; valueId: any; }) => ({
                 optionId: option.nameId,
                 optionValue: option.valueId || option.value
             }));
 
-            // 5. Update/add delivery date option
-            if (productOptions.deliveryDate && parsedLocalData.deliveryDate) {
-                const deliveryDateIndex = optionSelections.findIndex(
-                    (option: { optionId: any; }) => option.optionId === productOptions.deliveryDate
-                );
+            let hasChanges = false;
 
+            // 6. Check/update delivery date option
+            if (productOptions.deliveryDate && parsedLocalData.deliveryDate) {
                 // Format delivery date as mm/dd/yyyy
                 const deliveryDate = new Date(parsedLocalData.deliveryDate);
                 const formattedDeliveryDate = deliveryDate.toLocaleDateString('en-US', {
@@ -1381,22 +1430,27 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     year: 'numeric'
                 });
 
-                if (deliveryDateIndex >= 0) {
-                    optionSelections[deliveryDateIndex].optionValue = formattedDeliveryDate;
-                } else {
-                    optionSelections.push({
-                        optionId: productOptions.deliveryDate,
-                        optionValue: formattedDeliveryDate
-                    });
+                const currentDeliveryDate = currentOptionsMap.get(productOptions.deliveryDate);
+
+                if (currentDeliveryDate !== formattedDeliveryDate) {
+                    hasChanges = true;
+                    const deliveryDateIndex = optionSelections.findIndex(
+                        (option: { optionId: any; }) => option.optionId === productOptions.deliveryDate
+                    );
+
+                    if (deliveryDateIndex >= 0) {
+                        optionSelections[deliveryDateIndex].optionValue = formattedDeliveryDate;
+                    } else {
+                        optionSelections.push({
+                            optionId: productOptions.deliveryDate,
+                            optionValue: formattedDeliveryDate
+                        });
+                    }
                 }
             }
 
-            // 6. Update/add ship date option
+            // 7. Check/update ship date option
             if (productOptions.shipDate && parsedLocalData.dispatchDate) {
-                const shipDateIndex = optionSelections.findIndex(
-                    (option: { optionId: any; }) => option.optionId === productOptions.shipDate
-                );
-
                 // Format dispatch date as mm/dd/yyyy
                 const dispatchDate = new Date(parsedLocalData.dispatchDate);
                 const formattedDispatchDate = dispatchDate.toLocaleDateString('en-US', {
@@ -1405,39 +1459,59 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     year: 'numeric'
                 });
 
-                if (shipDateIndex >= 0) {
-                    optionSelections[shipDateIndex].optionValue = formattedDispatchDate;
-                } else {
-                    optionSelections.push({
-                        optionId: productOptions.shipDate,
-                        optionValue: formattedDispatchDate
-                    });
+                const currentShipDate = currentOptionsMap.get(productOptions.shipDate);
+
+                if (currentShipDate !== formattedDispatchDate) {
+                    hasChanges = true;
+                    const shipDateIndex = optionSelections.findIndex(
+                        (option: { optionId: any; }) => option.optionId === productOptions.shipDate
+                    );
+
+                    if (shipDateIndex >= 0) {
+                        optionSelections[shipDateIndex].optionValue = formattedDispatchDate;
+                    } else {
+                        optionSelections.push({
+                            optionId: productOptions.shipDate,
+                            optionValue: formattedDispatchDate
+                        });
+                    }
                 }
             }
 
-            // 7. Update/add gift message option
+            // 8. Check/update gift message option
             if (productOptions.giftMessage && parsedLocalData.giftMessage !== undefined) {
-                const giftMessageIndex = optionSelections.findIndex(
-                    (option: { optionId: any; }) => option.optionId === productOptions.giftMessage
-                );
+                const currentGiftMessage = currentOptionsMap.get(productOptions.giftMessage);
 
-                if (giftMessageIndex >= 0) {
-                    optionSelections[giftMessageIndex].optionValue = parsedLocalData.giftMessage;
-                } else {
-                    optionSelections.push({
-                        optionId: productOptions.giftMessage,
-                        optionValue: parsedLocalData.giftMessage
-                    });
+                if (currentGiftMessage !== parsedLocalData.giftMessage) {
+                    hasChanges = true;
+                    const giftMessageIndex = optionSelections.findIndex(
+                        (option: { optionId: any; }) => option.optionId === productOptions.giftMessage
+                    );
+
+                    if (giftMessageIndex >= 0) {
+                        optionSelections[giftMessageIndex].optionValue = parsedLocalData.giftMessage;
+                    } else {
+                        optionSelections.push({
+                            optionId: productOptions.giftMessage,
+                            optionValue: parsedLocalData.giftMessage
+                        });
+                    }
                 }
             }
 
-            // 8. Get checkout for cart update
+            // 9. Only update if there are changes
+            if (!hasChanges) {
+                console.log('No changes detected in item options, skipping update');
+                return;
+            }
+
+            // 10. Get checkout for cart update
             const checkout = getCheckout();
             if (!checkout) {
                 throw new Error('Checkout not available');
             }
 
-            // 9. Update the cart item with new options
+            // 11. Update the cart item with new options
             const updateResponse = await fetch(`/api/storefront/carts/${checkout.id}/items/${lineId}`, {
                 method: 'PUT',
                 headers: {
@@ -1457,7 +1531,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             if (!updateResponse.ok) {
                 throw new Error('Failed to update cart item options');
             }
-
 
             console.log('Item options updated successfully');
 
@@ -1518,8 +1591,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             }
 
             // Make sure changes are synchronized with checkout state
-            await loadCheckout();
-            await updateOrderSummaryDisplay();
+            // await loadCheckout();
+            // await updateOrderSummaryDisplay();
 
             // Mark this item as configured
             if (currentItem) {
@@ -1674,22 +1747,22 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             return;
         }
 
-        // Create a specific update to force recalculation of shipping totals in UI
-        const options = {
-            method: 'PUT',
-            headers: {
-                'Accept': 'application/json',
-                'Content-Type': 'application/json'
-            },
-            // We're not actually changing anything, just forcing a UI refresh
-            body: JSON.stringify({
-                // Include customerMessage to avoid mutations being ignored
-                customerMessage: checkout.customerMessage || ''
-            })
-        };
+        // // Create a specific update to force recalculation of shipping totals in UI
+        // const options = {
+        //     method: 'PUT',
+        //     headers: {
+        //         'Accept': 'application/json',
+        //         'Content-Type': 'application/json'
+        //     },
+        //     // We're not actually changing anything, just forcing a UI refresh
+        //     body: JSON.stringify({
+        //         // Include customerMessage to avoid mutations being ignored
+        //         customerMessage: checkout.customerMessage || ''
+        //     })
+        // };
 
         try {
-            await fetch(`/api/storefront/checkouts/${checkout.id}`, options);
+            // await fetch(`/api/storefront/checkouts/${checkout.id}`, options);
 
             // Reload checkout to ensure UI gets updated
             await loadCheckout();
@@ -1825,7 +1898,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             const newConsignments = checkoutResult.consignments || [];
 
             // Reload checkout to sync state and update UI
-            await loadCheckout();
+            //await loadCheckout();
 
 
             // Update or create stored consignments for each new consignment
@@ -1977,7 +2050,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 }
 
                 // Reload checkout to sync state
-                await loadCheckout();
+                //await loadCheckout();
 
                 return await response.json();
             }
@@ -2382,19 +2455,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     //     setConfiguredItems(newConfiguredItems);
     // };
 
-    const getItemDeliveryDate = (itemId: string | number): string | null => {
-        const cartItem = cartItems.find(item => item.id === itemId);
 
-        if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
-            return null;
-        }
-
-        const deliveryDateOption = cartItem.options.find((option: any) =>
-            option.name === "Delivery Date" || option.name.includes("Delivery Date")
-        );
-
-        return deliveryDateOption?.value || null;
-    };
 
     const getItemOptions = (itemId: string | Number, optionName: string) => {
         let optionValue = ""
@@ -2557,9 +2618,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                             //calendar edits 
                             try {
-
-                                await fetchCartData();
-                                const deliveryDate = getItemDeliveryDate(itemId);
+                                const deliveryDate = await getItemDeliveryDate(itemId);
 
                                 if (deliveryDate) {
                                     try {

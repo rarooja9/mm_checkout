@@ -614,6 +614,7 @@ class Checkout extends Component<
         SubscribeSessionStorage.removeSubscribeStatus();
 
         this.setState({ isRedirecting: true }, () => {
+            localStorage.clear();
             navigateToOrderConfirmation(orderId);
         });
     };

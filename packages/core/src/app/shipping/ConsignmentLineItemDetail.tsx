@@ -8,11 +8,22 @@ export interface ConsignmentLineItemDetailProps {
 }
 
 const renderProductOptionDetails = (item: MultiShippingTableItemWithType | PhysicalItem) => {
-    if (!item.options || !item.options.length) {
-        return null;
-    }
+   if (!item.options || !item.options.length) {
+       return null;
+   }
 
-    return (<span className="line-item-options">{` - ${item.options.map(option => option.value).join(' / ')}`}</span>);
+   const filteredOptions = item.options.filter(option => {
+       const optionName = option.name.toLowerCase();
+       return !optionName.includes('delivery date') && 
+              !optionName.includes('ship date') && 
+              !optionName.includes('gift message');
+   });
+
+   if (!filteredOptions.length) {
+       return null;
+   }
+
+   return (<span className="line-item-options">{` - ${filteredOptions.map(option => option.value).join(' / ')}`}</span>);
 }
 
 export const renderItemContent = (item: MultiShippingTableItemWithType | PhysicalItem) => {
