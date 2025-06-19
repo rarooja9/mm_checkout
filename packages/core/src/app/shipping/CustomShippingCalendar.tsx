@@ -3,7 +3,6 @@ import React, { useState, useEffect } from 'react';
 interface ShippingCalendarSelectorProps {
   onSelectShippingOption: (option: any) => void;
   onSelectDeliveryDate: (date: Date) => void;
-  calendarData: any;
   selectedShippingOption: any;
   currentConsignment: any;
   product: any;
@@ -34,7 +33,9 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
   useEffect(() => {
     const dates: Date[] = [];
     const today = new Date();
+    today.setDate(today.getDate() + 1);
     today.setHours(0, 0, 0, 0);
+
 
     for (let i = 0; i < 75; i++) {
       const date = new Date(today);
@@ -333,7 +334,7 @@ const ShippingCalendarSelector: React.FC<ShippingCalendarSelectorProps> = ({
                     }}
                     type="button"
                   >
-                    Load Methods
+                    View Methods
                   </button>
                 )}
               </div>

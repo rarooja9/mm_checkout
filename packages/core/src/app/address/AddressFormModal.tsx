@@ -100,12 +100,28 @@ const SaveAddressForm = withLanguage(
             shouldSaveAddress: false,
         }),
         validationSchema: ({ language, getFields }: AddressFormProps & WithLanguageProps) =>
-            lazy<Partial<AddressFormValues>>((values) =>
-                getAddressFormFieldsValidationSchema({
+            lazy<Partial<AddressFormValues>>((values) => {
+                // Get form fields based on country code
+                const fields = getFields(values && values.countryCode);
+                
+                // Check if address type is Commercial (value "1")
+                const isCommercial = values?.customFields?.field_26 == 1;
+                
+                // If Commercial, update the form fields to make company required
+                const updatedFields = isCommercial 
+                    ? fields.map(field => 
+                        field.name === 'company' 
+                            ? { ...field, required: true } 
+                            : field
+                      )
+                    : fields;
+                
+                // Return the validation schema with potentially updated fields
+                return getAddressFormFieldsValidationSchema({
                     language,
-                    formFields: getFields(values && values.countryCode),
-                }),
-            ),
+                    formFields: updatedFields,
+                });
+            }),
     })(SaveAddress),
 );
 

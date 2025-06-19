@@ -29,14 +29,22 @@ const OrderSummaryItem: FunctionComponent<OrderSummaryItemProps> = ({
     quantity,
     description,
 }) => {
-    // Filter out any product options that contain "Delivery Date"
+    // Filter out any product options that contain "Delivery Date", "Ship Date", or "Gift Message"
     const filteredOptions = productOptions?.filter(option => {
         // Check if the content is a string or has a string representation
         const optionContent = String(option.content || '');
-        
-        // Return false (exclude) if the option contains "Delivery Date"
-        return !optionContent.includes('Delivery Date');
+
+        // Return false (exclude) if the option contains any of these terms
+        return !optionContent.includes('Delivery Date') &&
+            !optionContent.includes('Ship Date') &&
+            !optionContent.includes('Gift Message');
     });
+
+    let processedDescription = description;
+    if (description && typeof description === 'string' && description.includes('Gift Message')) {
+        processedDescription = description.replace('Gift Message', '');
+    }
+
 
     return (
         <div className="product" data-test="cart-item">
@@ -61,12 +69,12 @@ const OrderSummaryItem: FunctionComponent<OrderSummaryItemProps> = ({
                         ))}
                     </ul>
                 )}
-                {description && (
+                {processedDescription && (
                     <div
                         className="product-description optimizedCheckout-contentSecondary"
                         data-test="cart-item-product-description"
                     >
-                        {description}
+                        {processedDescription}
                     </div>
                 )}
             </div>

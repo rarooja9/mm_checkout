@@ -71,150 +71,165 @@ const LoginForm: FunctionComponent<
     isFloatingLabelEnabled,
     viewType = CustomerViewType.Login,
 }) => {
-    const changeEmailLink = useCallback(() => {
-        if (!email) {
-            return null;
-        }
+        const changeEmailLink = useCallback(() => {
+            if (!email) {
+                return null;
+            }
+
+            return (
+                <p className="optimizedCheckout-contentSecondary">
+                    <TranslatedLink
+                        data={{ email }}
+                        id="customer.guest_could_login_change_email"
+                        onClick={onCancel}
+                        testId="change-email"
+                    />
+                </p>
+            );
+        }, [email, onCancel]);
 
         return (
-            <p className="optimizedCheckout-contentSecondary">
-                <TranslatedLink
-                    data={{ email }}
-                    id="customer.guest_could_login_change_email"
-                    onClick={onCancel}
-                    testId="change-email"
-                />
-            </p>
-        );
-    }, [email, onCancel]);
-
-    return (
-        <Form
-            className="checkout-form"
-            id="checkout-customer-returning"
-            testId="checkout-customer-returning"
-        >
-            <Fieldset
-                legend={
-                    <Legend hidden>
-                        <TranslatedString id="customer.returning_customer_text" />
-                    </Legend>
-                }
+            <Form
+                className="checkout-form"
+                id="checkout-customer-returning"
+                testId="checkout-customer-returning"
             >
-                {signInError && (
-                    <Alert testId="customer-login-error-message" type={AlertType.Error}>
-                        {mapErrorMessage(signInError, (key) => language.translate(key))}
-                    </Alert>
-                )}
-
-                {viewType === CustomerViewType.SuggestedLogin && (
-                    <Alert type={AlertType.Info}>
-                        <TranslatedHtml data={{ email }} id="customer.guest_could_login" />
-                    </Alert>
-                )}
-
-                {viewType === CustomerViewType.CancellableEnforcedLogin && (
-                    <Alert type={AlertType.Info}>
-                        <TranslatedHtml data={{ email }} id="customer.guest_must_login" />
-                    </Alert>
-                )}
-
-                {viewType === CustomerViewType.EnforcedLogin && (
-                    <Alert type={AlertType.Error}>
-                        <TranslatedLink
-                            id="customer.guest_temporary_disabled"
-                            onClick={onCreateAccount}
-                        />
-                    </Alert>
-                )}
-
-                {(viewType === CustomerViewType.Login ||
-                    viewType === CustomerViewType.EnforcedLogin) && (
-                    <EmailField isFloatingLabelEnabled={isFloatingLabelEnabled} onChange={onChangeEmail} />
-                )}
-
-                <PasswordField isFloatingLabelEnabled={isFloatingLabelEnabled} />
-
-                <p className="form-legend-container">
-                    <span>
-                        { isSignInEmailEnabled &&
-                            <TranslatedLink
-                                id="login_email.link"
-                                onClick={ onSendLoginEmail }
-                                testId="customer-signin-link"
-                            />
-                        }
-                        { !isSignInEmailEnabled &&
-                            <a
-                                data-test="forgot-password-link"
-                                href={ forgotPasswordUrl }
-                                rel="noopener noreferrer"
-                                target="_blank"
-                            >
-                                <TranslatedString id="customer.forgot_password_action" />
-                            </a>
-                        }
-                    </span>
-                    { viewType === CustomerViewType.Login && shouldShowCreateAccountLink &&
-                        <span>
-                            <TranslatedLink
-                                id="customer.create_account_to_continue_text"
-                                onClick={onCreateAccount}
-                            />
-                        </span>
+                <Fieldset
+                    legend={
+                        <Legend hidden>
+                            <TranslatedString id="customer.returning_customer_text" />
+                        </Legend>
                     }
-                </p>
-
-                <div className="form-actions">
-                    <Button
-                        disabled={isSigningIn || isExecutingPaymentMethodCheckout}
-                        id="checkout-customer-continue"
-                        isLoading={isSigningIn || isExecutingPaymentMethodCheckout}
-                        testId="customer-continue-button"
-                        type="submit"
-                        variant={ButtonVariant.Primary}
-                    >
-                        <TranslatedString id="customer.sign_in_action" />
-                    </Button>
-
-                    {viewType === CustomerViewType.SuggestedLogin && (
-                        <a
-                            className="button optimizedCheckout-buttonSecondary"
-                            data-test="customer-guest-continue"
-                            href="#"
-                            id="checkout-guest-continue"
-                            onClick={preventDefault(onContinueAsGuest)}
-                        >
-                            <TranslatedString id={continueAsGuestButtonLabelId} />
-                        </a>
+                >
+                    {signInError && (
+                        <Alert testId="customer-login-error-message" type={AlertType.Error}>
+                            {mapErrorMessage(signInError, (key) => language.translate(key))}
+                        </Alert>
                     )}
 
-                    {canCancel &&
-                        viewType !== CustomerViewType.EnforcedLogin &&
-                        viewType !== CustomerViewType.SuggestedLogin && (
+                    {viewType === CustomerViewType.SuggestedLogin && (
+                        <Alert type={AlertType.Info}>
+                            <TranslatedHtml data={{ email }} id="customer.guest_could_login" />
+                        </Alert>
+                    )}
+
+                    {viewType === CustomerViewType.CancellableEnforcedLogin && (
+                        <Alert type={AlertType.Info}>
+                            <TranslatedHtml data={{ email }} id="customer.guest_must_login" />
+                        </Alert>
+                    )}
+
+                    {viewType === CustomerViewType.EnforcedLogin && (
+                        <Alert type={AlertType.Error}>
+                            <TranslatedLink
+                                id="customer.guest_temporary_disabled"
+                                onClick={onCreateAccount}
+                            />
+                        </Alert>
+                    )}
+
+                    {(viewType === CustomerViewType.Login ||
+                        viewType === CustomerViewType.EnforcedLogin) && (
+                            <EmailField isFloatingLabelEnabled={isFloatingLabelEnabled} onChange={onChangeEmail} />
+                        )}
+
+                    <PasswordField isFloatingLabelEnabled={isFloatingLabelEnabled} />
+
+                    <p className="form-legend-container">
+                        <span>
+                            {isSignInEmailEnabled &&
+                                <TranslatedLink
+                                    id="login_email.link"
+                                    onClick={onSendLoginEmail}
+                                    testId="customer-signin-link"
+                                />
+                            }
+                            {!isSignInEmailEnabled &&
+                                <a
+                                    data-test="forgot-password-link"
+                                    href={forgotPasswordUrl}
+                                    rel="noopener noreferrer"
+                                    target="_blank"
+                                >
+                                    <TranslatedString id="customer.forgot_password_action" />
+                                </a>
+                            }
+                        </span>
+                        {/* {viewType === CustomerViewType.Login && shouldShowCreateAccountLink &&
+                            <span className='tt-create-account'>
+                                <TranslatedLink
+                                    id="customer.create_account_to_continue_text"
+                                    onClick={onCreateAccount}
+                                />
+                            </span>
+                        } */}
+                    </p>
+
+                    <div className="form-actions">
+                        <Button
+                            disabled={isSigningIn || isExecutingPaymentMethodCheckout}
+                            id="checkout-customer-continue"
+                            isLoading={isSigningIn || isExecutingPaymentMethodCheckout}
+                            testId="customer-continue-button"
+                            type="submit"
+                            variant={ButtonVariant.Primary}
+                        >
+                            <TranslatedString id="customer.sign_in_action" />
+                        </Button>
+
+                        {viewType === CustomerViewType.Login && shouldShowCreateAccountLink && (
+                            <>
+                                <span className="form-actions-separator">or</span>
+                                <Button
+                                    id="checkout-customer-create-account"
+                                    testId="customer-create-account-button"
+                                    type="button"
+                                    variant={ButtonVariant.Secondary}
+                                    onClick={onCreateAccount}
+                                >
+                                    Create an account
+                                </Button>
+                            </>
+                        )}
+
+                        {viewType === CustomerViewType.SuggestedLogin && (
                             <a
                                 className="button optimizedCheckout-buttonSecondary"
-                                data-test="customer-cancel-button"
+                                data-test="customer-guest-continue"
                                 href="#"
-                                id="checkout-customer-cancel"
-                                onClick={preventDefault(onCancel)}
+                                id="checkout-guest-continue"
+                                onClick={preventDefault(onContinueAsGuest)}
                             >
-                                <TranslatedString
-                                    id={
-                                        viewType === CustomerViewType.CancellableEnforcedLogin
-                                            ? 'login_email.use_another_email'
-                                            : 'common.cancel_action'
-                                    }
-                                />
+                                <TranslatedString id={continueAsGuestButtonLabelId} />
                             </a>
                         )}
-                </div>
 
-                {viewType === CustomerViewType.SuggestedLogin && changeEmailLink()}
-            </Fieldset>
-        </Form>
-    );
-};
+                        {canCancel &&
+                            viewType !== CustomerViewType.EnforcedLogin &&
+                            viewType !== CustomerViewType.SuggestedLogin && (
+                                <a
+                                    className="button optimizedCheckout-buttonSecondary"
+                                    data-test="customer-cancel-button"
+                                    href="#"
+                                    id="checkout-customer-cancel"
+                                    onClick={preventDefault(onCancel)}
+                                >
+                                    <TranslatedString
+                                        id={
+                                            viewType === CustomerViewType.CancellableEnforcedLogin
+                                                ? 'login_email.use_another_email'
+                                                : 'common.cancel_action'
+                                        }
+                                    />
+                                </a>
+                            )}
+                    </div>
+
+                    {viewType === CustomerViewType.SuggestedLogin && changeEmailLink()}
+                </Fieldset>
+            </Form>
+        );
+    };
 
 export default withLanguage(
     withFormik<LoginFormProps & WithLanguageProps, LoginFormValues>({

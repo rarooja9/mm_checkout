@@ -63,6 +63,7 @@ export default memoize(function getAddressFormFieldsValidationSchema({
     formFields,
     language,
 }: AddressFormFieldsValidationSchemaOptions): ObjectSchema<FormFieldValues> {
+    // Get the base schema
     return getFormFieldsValidationSchema({
         formFields,
         translate: getTranslateAddressError(language),

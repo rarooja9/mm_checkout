@@ -159,7 +159,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const [selectedShippingDate, setSelectedShippingDate] = useState<Date | null>(null);
     const [cartItems, setCartItems] = useState<any[]>([]);
 
-    const [shippingCalendarData, setShippingCalendarData] = useState<any>(null);
     const [isDeliveryDateModalOpen, setIsDeliveryDateModalOpen] = useState(false);
     const physicalItems = cart.lineItems.physicalItems;
 
@@ -203,14 +202,18 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
             const cartData = await response.json();
             if (cartData && cartData.length > 0 && cartData[0].lineItems) {
-                setCartItems(cartData[0].lineItems.physicalItems || []);
+                const physicalItemsWithOptions = cartData[0].lineItems.physicalItems || [];
+                setCartItems(physicalItemsWithOptions);
 
                 // Fetch and store product options for missing products
                 await fetchAndStoreProductOptions(physicalItems);
+
+                return physicalItemsWithOptions; // Return the data
             }
-            return true
+            return [];
         } catch (err) {
             console.error('Error fetching cart data:', err);
+            return [];
         }
     };
 
@@ -300,30 +303,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         return deliveryDateOption.value && deliveryDateOption.value.trim() !== '';
     };
 
-    const getDeliveryDateForItem = async (itemId: string | number) => {
-        try {
-            let cartItem: any;
 
-            if (cartItems && cartItems.length === 0) {
-                const items = await fetchPhysicalItems();
-                cartItem = items.find((item: any) => item.id == itemId);
-            } else {
-                cartItem = cartItems.find(item => item.id == itemId);
-            }
-
-            if (!cartItem) return null;
-
-            const deliveryDateOption = cartItem.options?.find(
-                (option: { name: string }) => option.name === 'Delivery Date'
-            );
-
-            return deliveryDateOption ? deliveryDateOption.value : null;
-
-        } catch (error) {
-            console.error('Error getting delivery date from line item options:', error);
-            return null;
-        }
-    };
 
 
     const clearDeliveryDateForItem = async (checkoutId: string, lineItemId: { toString: () => any; }) => {
@@ -445,6 +425,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         return;
                     }
 
+                    // PRELOAD CART DATA FIRST
+                    const cartItemsWithOptions = await fetchCartData();
+
                     // Single combined request for all checkout data
                     const checkoutOptions = {
                         method: 'GET',
@@ -513,42 +496,55 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         }
                     }
 
-                    // Process consignments without shipping options
                     const isConsignmentValidForDelivery = (consignment: { selectedShippingOption: any; lineItemIds: any; }) => {
-                        console.log('consignment', consignment)
                         // Check if consignment has selected shipping option
                         if (!consignment.selectedShippingOption) {
                             return false;
                         }
 
-                        // Check delivery date for each line item in the consignment
+                        // Check delivery date for each line item using preloaded cart data
                         const lineItemIds = Array.isArray(consignment.lineItemIds)
                             ? consignment.lineItemIds
                             : [consignment.lineItemIds];
-                        console.log('lineItemIds', lineItemIds)
-                        return lineItemIds.every(async (lineItemId: string | number) => {
-                            // Check if line item has delivery date value
-                            if (!hasValidOptionValue(lineItemId, "Delivery Date")) {
+
+                        return lineItemIds.every((lineItemId: string | number) => {
+                            // Use preloaded cart data 
+                            const cartItem = cartItemsWithOptions.find((item: any) => item.id == lineItemId);
+
+                            if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
                                 return false;
                             }
 
-                            const deliveryDate = await getDeliveryDateForItem(lineItemId);
-                            if (!deliveryDate) {
+                            const deliveryDateOption = cartItem.options.find((option: any) =>
+                                option.name === "Delivery Date" || option.name.includes("Delivery Date")
+                            );
+
+                            // If there's no delivery date option, we don't need to check it
+                            if (!deliveryDateOption) {
+                                return true;
+                            }
+
+                            // Check if the delivery date has a value that's not empty
+                            if (!deliveryDateOption.value || deliveryDateOption.value.trim() === '') {
                                 return false;
                             }
 
-                            const currentDate = new Date();
-                            const itemDeliveryDate = new Date(deliveryDate);
-                            console.log('itemDeliveryDate', itemDeliveryDate)
-                            console.log('currentDate', currentDate)
-                            return itemDeliveryDate > currentDate;
+                            // Check if delivery date is in the future
+                            try {
+                                const currentDate = new Date();
+                                const itemDeliveryDate = new Date(deliveryDateOption.value);
+                                return itemDeliveryDate > currentDate;
+                            } catch (error) {
+                                return false;
+                            }
                         });
                     };
 
-                    // Update the consignmentsToRemove filter
-                    const consignmentsToRemove = currentConsignments.filter(
-                        (consignment: any) => !isConsignmentValidForDelivery(consignment)
-                    )
+                    // SYNCHRONOUS validation - no more async delays!
+                    const consignmentsToRemove = currentConsignments.filter((consignment: any) => {
+                        return !isConsignmentValidForDelivery(consignment);
+                    });
+
                     if (consignmentsToRemove.length > 0) {
                         // Process consignments sequentially to avoid race conditions
                         for (const consignment of consignmentsToRemove) {
@@ -610,7 +606,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         setItemConsignments(initialConsignments);
 
                         const configuredItemsMap: { [key: string]: boolean } = {};
-                        initialConsignments.forEach(async consignment => {
+
+                        // Use Promise.all to handle async operations properly
+                        const configurationPromises = initialConsignments.map(async (consignment) => {
                             // First check if consignment has address and shipping option
                             const hasAddressAndShipping = Boolean(
                                 consignment.shippingAddress && consignment.selectedShippingOption
@@ -620,7 +618,15 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             const hasValidDeliveryDateValue = await hasValidOptionValue(consignment.lineItemId, "Delivery Date");
 
                             // Only consider an item configured if it has all three requirements
-                            configuredItemsMap[consignment.lineItemId] = hasAddressAndShipping && hasValidDeliveryDateValue;
+                            return {
+                                lineItemId: consignment.lineItemId,
+                                isConfigured: hasAddressAndShipping && hasValidDeliveryDateValue
+                            };
+                        });
+
+                        const configurationResults = await Promise.all(configurationPromises);
+                        configurationResults.forEach(result => {
+                            configuredItemsMap[result.lineItemId] = result.isConfigured;
                         });
 
                         setConfiguredItems(configuredItemsMap);
@@ -630,9 +636,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         );
                         setCurrentItemIndex(firstUnconfiguredIndex >= 0 ? firstUnconfiguredIndex : 0);
                     } else {
-
-
                         // Check if there are any consignments with multiple items that need to be split
+
                         const consignmentsToSplit = currentConsignments.filter(
                             (consignment: { lineItemIds: string | any[]; }) => consignment.lineItemIds && consignment.lineItemIds.length > 1
                         );
@@ -640,7 +645,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         // Save the original item order for displaying
                         const itemOrder = physicalItems.map(item => item.id.toString());
                         setOriginalItemOrder(itemOrder);
-
+                      
                         if (consignmentsToSplit.length > 0 && deleteConsignments) {
                             // Only delete consignments that have multiple items
                             await deleteConsignments();
@@ -659,6 +664,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             setSelectedAddress(null);
                             setSelectedShippingOption(null);
                         } else {
+                           
                             // Map existing consignments to our local state model
                             const mappedConsignments: ConsignmentWithItem[] = [];
                             const configuredItemsMap: { [key: string]: boolean } = {};
@@ -678,10 +684,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                     const hasAddressAndShipping = Boolean(
                                         consignment.shippingAddress && consignment.selectedShippingOption
                                     );
-                                    // const hasValidDeliveryDateValue = hasValidDeliveryDate(lineItemId);
-                                    // console.log('hasValidDeliveryDateValue', hasValidDeliveryDateValue)
-                                    // console.log('hasAddressAndShipping', hasAddressAndShipping)
-                                    // console.log('lineItemId', lineItemId)
+
                                     configuredItemsMap[lineItemId] = hasAddressAndShipping;
                                 }
                             }
@@ -871,22 +874,32 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
     // Check if all items are configured
     useEffect(() => {
-        if (physicalItems.length === 0) {
-            setAllItemsConfigured(false);
-            return;
-        }
+        const checkAllItemsConfigured = async () => {
+            if (physicalItems.length === 0) {
+                setAllItemsConfigured(false);
+                return;
+            }
 
-        const allConfigured = physicalItems.every(async item => {
-            // Check if the item has a shipping address and shipping option
-            const isBasicConfigured = Boolean(configuredItems[item.id]);
+            // Use Promise.all to properly handle async operations
+            const configurationChecks = await Promise.all(
+                physicalItems.map(async (item) => {
+                    // Check if the item has a shipping address and shipping option
+                    const isBasicConfigured = Boolean(configuredItems[item.id]);
 
-            // Check if the item has a valid delivery date
-            const hasDeliveryDate = await hasValidOptionValue(item.id, "Delivery Date");
+                    // Check if the item has a valid delivery date
+                    const hasDeliveryDate = await hasValidOptionValue(item.id, "Delivery Date");
 
-            // Item is fully configured only if both conditions are met
-            return isBasicConfigured && hasDeliveryDate;
-        });
-        setAllItemsConfigured(allConfigured);
+                    // Item is fully configured only if both conditions are met
+                    return isBasicConfigured && hasDeliveryDate;
+                })
+            );
+
+            // Check if all items are configured
+            const allConfigured = configurationChecks.every(isConfigured => isConfigured);
+            setAllItemsConfigured(allConfigured);
+        };
+
+        checkAllItemsConfigured();
     }, [physicalItems, configuredItems, cartItems]);
 
     const getCurrentItem = () => {
@@ -1221,184 +1234,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
-    const fetchAllShippingDates = async (
-        address: Address,
-        lineItemId: string | number,
-        quantity: string | number,
-        availableShippingOptions: any[]
-    ) => {
-        try {
-            setIsLoadingDates(true);
-            const checkout = getCheckout();
-            if (!checkout) {
-                throw new Error('Checkout not available');
-            }
-
-            const requestBody = {
-                cartId: checkout.id,
-                itemId: lineItemId.toString(),
-                quantity: quantity || 1,
-                shippingMethod: "",
-                address: {
-                    country: address.countryCode,
-                    region: address.stateOrProvinceCode,
-                    city: address.city,
-                    zipcode: address.postalCode
-                }
-            };
-
-            // Fetch available dates from middleware
-            const response = await fetch('https://bc-middleware-mm.onrender.com/get-dates', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch shipping dates');
-            }
-
-            const dateData: ShippingDateResponse = await response.json();
-
-            // Create a map of shipping methods with their available dates
-            const shippingMethodsWithDates = [];
-
-            // Store the first method's dates as fallback
-            let fallbackDates: string | any[] = [];
-            if (dateData.methods && dateData.methods.length > 0) {
-                fallbackDates = dateData.methods[0].availableDates;
-            } else if (dateData.availableDates && dateData.availableDates.length > 0) {
-                fallbackDates = dateData.availableDates;
-            }
-
-            // Process each available shipping option
-            for (const option of availableShippingOptions) {
-                const methodName = option.description;
-                const methodId = option.id;
-                const methodCost = option.cost;
-
-                // Try to find a match in the dateData.methods
-                let matchedDates: any = [];
-
-                if (dateData.methods) {
-                    const methodMatch = dateData.methods.find(m =>
-                        methodName.toLowerCase().includes(m.method.toLowerCase()) ||
-                        m.method.toLowerCase().includes(methodName.toLowerCase())
-                    );
-
-                    if (methodMatch) {
-                        matchedDates = methodMatch.availableDates;
-                    }
-                }
-
-                // If no matched dates, use common available dates
-                if (matchedDates.length === 0 && dateData.availableDates) {
-                    matchedDates = dateData.availableDates;
-                }
-
-                // If still no dates, use fallback dates from first method
-                if (matchedDates.length === 0 && fallbackDates.length > 0) {
-                    matchedDates = fallbackDates;
-                }
-
-                // Create a shipping method entry with dates
-                shippingMethodsWithDates.push({
-                    method: methodName,
-                    code: methodId,
-                    totalCharges: methodCost,
-                    availableDates: matchedDates
-                });
-            }
-
-            // Create the final calendar data
-            const calendarData = {
-                methods: shippingMethodsWithDates,
-                allDates: dateData.availableDates || fallbackDates,
-                dateFormat: "M/d/yyyy"
-            };
-            console.log('calendarData', calendarData)
-            // Set the calendar data in state
-            setShippingCalendarData(calendarData);
-
-            return calendarData;
-        } catch (error) {
-            console.error('Error fetching shipping dates:', error);
-
-            // Create fallback calendar data with dates from first method if possible
-            let fallbackDates = [];
-
-            try {
-                const checkout = getCheckout();
-                if (checkout) {
-                    const requestBody = {
-                        cartId: checkout.id,
-                        itemId: lineItemId.toString(),
-                        quantity: 1,
-                        shippingMethod: "",
-                        address: {
-                            country: address.countryCode,
-                            region: address.stateOrProvinceCode,
-                            city: address.city,
-                            zipcode: address.postalCode
-                        }
-                    };
-
-                    const response = await fetch('https://bc-middleware-mm.onrender.com/get-dates', {
-                        method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify(requestBody)
-                    });
-
-                    if (response.ok) {
-                        const basicDateData = await response.json();
-                        if (basicDateData.methods && basicDateData.methods.length > 0) {
-                            fallbackDates = basicDateData.methods[0].availableDates;
-                        } else if (basicDateData.availableDates) {
-                            fallbackDates = basicDateData.availableDates;
-                        }
-                    }
-                }
-            } catch (fallbackError) {
-                console.error('Error getting fallback dates:', fallbackError);
-            }
-
-            // If we still don't have dates, then as last resort use default dates
-            if (fallbackDates.length === 0) {
-                // Create default dates as a last resort
-                const defaultDates = generateDefaultDates();
-                fallbackDates = defaultDates.map(date => ({
-                    display: date.toLocaleDateString('en-US', {
-                        month: '2-digit',
-                        day: '2-digit',
-                        year: 'numeric'
-                    }),
-                    iso: date.toISOString().split('T')[0],
-                    value: date.getTime()
-                }));
-            }
-
-            const defaultCalendarData = {
-                methods: availableShippingOptions.map(option => ({
-                    method: option.description,
-                    code: option.id,
-                    totalCharges: option.cost,
-                    availableDates: fallbackDates
-                })),
-                allDates: fallbackDates,
-                dateFormat: "M/d/yyyy"
-            };
-
-            setShippingCalendarData(defaultCalendarData);
-            return defaultCalendarData;
-        } finally {
-            setIsLoadingDates(false);
-        }
-    };
-
     const refreshCheckoutTotals = async () => {
         setIsLoading(true);
         try {
@@ -1597,6 +1432,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 throw new Error('Failed to update cart item options');
             }
 
+
             console.log('Item options updated successfully');
 
         } catch (error) {
@@ -1636,9 +1472,22 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 return;
             }
         }
+        setIsLoading(true);
+        await setItemOptions(storageKey);
 
-        await setItemOptions(storageKey)
+        // Add this section to update local state after setting options
+        const updatedItemConsignments = [...itemConsignments];
+        const currentIndex = updatedItemConsignments.findIndex(c => c.lineItemId === currentItem.id);
 
+        if (currentIndex >= 0) {
+            updatedItemConsignments[currentIndex] = {
+                ...updatedItemConsignments[currentIndex],
+                selectedShippingOption: selectedShippingOption,
+            };
+            setItemConsignments(updatedItemConsignments);
+        }
+
+        setIsLoading(false);
         // Make sure changes are synchronized with checkout state
         await loadCheckout();
         await updateOrderSummaryDisplay();
@@ -1952,41 +1801,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                 );
             });
 
-            // // Update itemConsignments with the restored data
-            // const updatedItemConsignments = itemConsignments.map(consignment => {
-            //     // Find the corresponding consignment in updatedConsignments
-            //     const matchingConsignment = newConsignments.find(
-            //         (c: { lineItemIds: (string | number)[]; }) => c.lineItemIds[0] === consignment.lineItemId
-            //     );
-
-            //     if (matchingConsignment) {
-            //         return {
-            //             ...consignment,
-            //             id: matchingConsignment.id,
-            //             shippingAddress: matchingConsignment.shippingAddress,
-            //             selectedShippingOption: matchingConsignment.selectedShippingOption,
-            //             availableShippingOptions: matchingConsignment.availableShippingOptions || [],
-            //         };
-            //     }
-
-            //     return consignment;
-            // });
-
-            // // Update state
-            // setItemConsignments(updatedItemConsignments);
-
-            // setItemConsignments(prevConsignments => {
-            //     // Filter out existing consignments for the split item
-            //     const filteredConsignments = prevConsignments.filter(
-            //         c => c.lineItemId !== lineItemId
-            //     );
-
-            //     // Add new unique consignments
-            //     return [
-            //         ...filteredConsignments,
-            //         ...newItemConsignments
-            //     ];
-            // });
 
             const mergeConsignments = (existingConsignments: ConsignmentWithItem[], newConsignments: any[]) => {
                 // Create a map to help with deduplication and prioritization
@@ -2536,6 +2350,23 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         return deliveryDateOption?.value || null;
     };
 
+    const getItemOptions = (itemId: string | Number, optionName: string) => {
+        let optionValue = ""
+        const itemDetailsString = localStorage.getItem(itemId.toString());
+        if (itemDetailsString) {
+            try {
+                const itemDetails: any = JSON.parse(itemDetailsString);
+                const optionId = optionName === "Delivery Date" ? "deliveryDate" : "giftMessage";
+
+                optionValue = itemDetails[optionId];
+            } catch (error) {
+                console.error('Error parsing localStorage data:', error);
+                return null;
+            }
+        }
+        return optionValue;
+    };
+
     const handleSubmitGiftMessage = async (message: string) => {
         if (!currentGiftMessageItemId) return;
 
@@ -2680,13 +2511,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                             //calendar edits 
                             try {
-                                // Fetch the calendar data for all shipping options
-                                await fetchAllShippingDates(
-                                    relevantConsignment.shippingAddress,
-                                    itemId,
-                                    physicalItems[index].quantity,
-                                    relevantConsignment.availableShippingOptions
-                                );
 
                                 await fetchCartData();
                                 const deliveryDate = getItemDeliveryDate(itemId);
@@ -2861,6 +2685,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     };
 
 
+
     const handleFinalContinue = async () => {
         if (isLoading) return;
 
@@ -2962,7 +2787,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             return (<>{renderDatePickerInput()}</>)
         }
         // If we have selected a shipping option, show options and date picker
-        if (selectedShippingOption && shippingCalendarData) {
+        if (selectedShippingOption) {
             return (
                 <div className="tt-custom-shipping-options">
                     <h4 className="optimizedCheckout-headingSecondary">
@@ -3082,8 +2907,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             !isConfigured &&
             item.quantity > 1 &&
             (!consignment || !consignment.id);
-
-        const hasGiftMessage = item.giftWrapping && item.giftWrapping.message && item.giftWrapping.message != '_';
+        const giftMessage = getItemOptions(item.id, "Gift Message")
+        const hasGiftMessage = giftMessage && giftMessage != '_';
         const showAddGiftMessageButton = !hasGiftMessage && !showSplitButton;
         const currentConsignment = getCurrentConsignment();
         return (
@@ -3140,12 +2965,12 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                         Gift Message
                                     </h4>
                                     <div className="tt-custom-gift-message">
-                                        <div className="tt-custom-gift-message-text">{item?.giftWrapping?.message}</div>
+                                        <div className="tt-custom-gift-message-text">{giftMessage}</div>
                                         <a
                                             href="#"
                                             onClick={(e) => {
                                                 e.preventDefault();
-                                                handleEditGiftMessage(item.id, item?.giftWrapping?.message || '');
+                                                handleEditGiftMessage(item.id, giftMessage || '');
                                             }}
                                             className="tt-edit-gift-message-link"
                                         >
@@ -3242,10 +3067,10 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             )}
                         </div>
 
-                        {getItemDeliveryDate(item.id) && (
+                        {getItemOptions(item.id, "Delivery Date") && (
                             <div className="tt-custom-item-delivery-date">
                                 <span className="tt-custom-delivery-date-label">Estimated Delivery Date:</span>
-                                <span className="tt-custom-delivery-date-value">{getItemDeliveryDate(item.id)}</span>
+                                <span className="tt-custom-delivery-date-value">{getItemOptions(item.id, "Delivery Date")}</span>
                             </div>
                         )}
                         {/* Display Gift Message in Edit Mode if it exists */}
@@ -3255,7 +3080,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                     Gift Message
                                 </h4>
                                 <div className="tt-custom-gift-message">
-                                    <div className="tt-custom-gift-message-text">{item?.giftWrapping?.message}</div>
+                                    <div className="tt-custom-gift-message-text">{giftMessage}</div>
                                 </div>
                             </div>
                         )}
@@ -3325,7 +3150,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     <DeliveryDateModal
                         isOpen={isDeliveryDateModalOpen}
                         isLoading={isLoading || isLoadingDates}
-                        calendarData={shippingCalendarData}
                         currentConsignment={currentConsignment}
                         product={currentItem}
                         selectedShippingOption={selectedShippingOption}

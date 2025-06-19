@@ -7,7 +7,6 @@ import ShippingCalendarSelector from './CustomShippingCalendar';
 interface DeliveryDateModalProps {
     isOpen: boolean;
     isLoading: boolean;
-    calendarData: any;
     currentConsignment: any;
     product: any;
     selectedShippingOption: any;
@@ -20,7 +19,6 @@ interface DeliveryDateModalProps {
 const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
     isOpen,
     isLoading,
-    calendarData,
     currentConsignment,
     product,
     selectedShippingOption: initialShippingOption,
@@ -74,7 +72,6 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
                     <form onSubmit={handleSubmit}>
                         <div className="form-field">
                                 <ShippingCalendarSelector
-                                    calendarData={calendarData}
                                     currentConsignment={currentConsignment}
                                     product={product}
                                     onSelectShippingOption={handleShippingOptionSelect}

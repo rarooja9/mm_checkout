@@ -58,7 +58,7 @@ const Redeemable: FunctionComponent<
                         href="#"
                         onClick={preventDefault(toggle)}
                     >
-                        <TranslatedString id="redeemable.toggle_action" />
+                       Coupon
                     </a>
                 )}
                 {!shouldCollapseCouponCode && (
