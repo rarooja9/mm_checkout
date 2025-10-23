@@ -125,6 +125,7 @@ const GiftMessageModal: FunctionComponent<GiftMessageModalProps> = ({
                             <Button
                                 onClick={handleCancelSkip}
                                 variant={ButtonVariant.Secondary}
+                                className="skip-gift-message-btn"
                             >
                                 Add Gift Message
                             </Button>
@@ -172,7 +173,7 @@ const GiftMessageModal: FunctionComponent<GiftMessageModalProps> = ({
                             </div>
                         )}
                         <div className="form-inlineMessage">
-                            <span>Be sure to sign your gift message</span>
+                            <b>___ Be sure to sign your gift message</b>
                             <span style={{ float: 'right' }}>
                                 {editedMessage.length} / {maxCharacterLimit}
                             </span>
@@ -188,7 +189,7 @@ const GiftMessageModal: FunctionComponent<GiftMessageModalProps> = ({
                                 style={{ marginRight: '10px' }}
                             />
                             <label htmlFor="giftMessageApproval">
-                                I have reviewed my gift message and approve its content
+                                I have signed and reviewed my gift message and approve its content.
                             </label>
                         </div>
                     </div>

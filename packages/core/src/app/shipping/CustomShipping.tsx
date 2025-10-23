@@ -4,7 +4,6 @@ import { LoadingOverlay } from '../ui/loading';
 import { Alert } from '../ui/alert';
 import { TranslatedString } from '@bigcommerce/checkout/locale';
 import { useCheckout } from "@bigcommerce/checkout/payment-integration-api";
-import DatePicker from 'react-datepicker';
 //import '../styles/tailwind.css';
 import {
     Cart,
@@ -36,24 +35,11 @@ class InvalidAddressError extends Error {
     }
 }
 
-interface ShippingDate {
-    display: string;
-    iso: string;
-    value: number;
-}
-
-interface ShippingDateResponse {
-    availableDates?: ShippingDate[];
-    methods?: Array<{
-        method: string;
-        availableDates: ShippingDate[];
-    }>;
-}
-
 export interface LineItem {
     id: string | number;
     name: string;
     imageUrl?: string;
+    sku: string;
     quantity: number;
     giftWrapping?: {
         name?: string;
@@ -116,6 +102,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     googleMapsApiKey = '',
     isFloatingLabelEnabled,
 }) => {
+
+    const filteredCountries = countries.filter(country => country.code === 'US');
+
     // Component services and hooks
     const {
         checkoutService: {
@@ -147,7 +136,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const [configuredItems, setConfiguredItems] = useState<{ [key: string]: boolean }>({});
     const [allItemsConfigured, setAllItemsConfigured] = useState(false);
     const [createCustomerAddressError, setCreateCustomerAddressError] = useState<Error | undefined>();
-    const [isLoadingShippingOptions, setIsLoadingShippingOptions] = useState(false);
+
+    const [itemGuestAddresses, setItemGuestAddresses] = useState<{ [key: string]: any }>({});
+    const [isEditingGuestAddress, setIsEditingGuestAddress] = useState(false);
 
     // Add originalItemOrder state to maintain the display order
     const [originalItemOrder, setOriginalItemOrder] = useState<string[]>([]);
@@ -156,8 +147,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
     const [currentGiftMessageItemId, setCurrentGiftMessageItemId] = useState<string | number | null>(null);
     const [editedGiftMessage, setEditedGiftMessage] = useState('');
 
-    const [availableShippingDates, setAvailableShippingDates] = useState<Date[]>([]);
+    //const [availableShippingDates, setAvailableShippingDates] = useState<Date[]>([]);
     const [selectedShippingDate, setSelectedShippingDate] = useState<Date | null>(null);
+    const [selectedDeliveryDate, setSelectedDeliveryDate] = useState<Date | null>(null);
     const [cartItems, setCartItems] = useState<any[]>([]);
 
     const [isDeliveryDateModalOpen, setIsDeliveryDateModalOpen] = useState(false);
@@ -324,6 +316,28 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         return deliveryDateOption?.value || null;
     };
 
+    const getItemShippingDate = async (itemId: string | number): Promise<string | null> => {
+        let cartItem: any;
+        if (cartItems && cartItems.length === 0) {
+            const items = await fetchPhysicalItems();
+            cartItem = items.find((item: any) => item.id == itemId);
+        } else {
+            cartItem = cartItems.find(item => item.id == itemId);
+        }
+
+        if (!cartItem || !cartItem.options || !Array.isArray(cartItem.options)) {
+            return null;
+        }
+
+        const deliveryDateOption = cartItem.options.find((option: any) =>
+            option.name === "Ship Date" || option.name.includes("Ship Date")
+        );
+
+        return deliveryDateOption?.value || null;
+    };
+
+
+
 
     const clearDeliveryDateForItem = async (checkoutId: string, lineItemId: { toString: () => any; }) => {
         try {
@@ -429,6 +443,30 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             return () => clearTimeout(errorTimeout);
         }
     }, [error]);
+
+    useEffect(() => {
+        const checkout = getCheckout();
+        const isGuest = !checkout || !checkout.customer || checkout.customer.id === 0;
+
+        if (isGuest) {
+            // Load all item-specific guest addresses
+            const itemAddresses: { [key: string]: any } = {};
+
+            physicalItems.forEach(item => {
+                const storageKey = `guestAddress_${item.id}`;
+                const storedAddress = localStorage.getItem(storageKey);
+                if (storedAddress) {
+                    try {
+                        itemAddresses[item.id.toString()] = JSON.parse(storedAddress);
+                    } catch (error) {
+                        console.error(`Error parsing guest address for item ${item.id}:`, error);
+                    }
+                }
+            });
+
+            setItemGuestAddresses(itemAddresses);
+        }
+    }, [physicalItems]);
 
     // First initialization - only remove consignments that have multiple items
     // Initialize consignments and split items if needed
@@ -738,29 +776,55 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                     setItemConsignments(initialConsignments);
 
+                    // // Set up configured items map
+                    // const configuredItemsMap: { [key: string]: boolean } = {};
+
+                    // // OPTIMIZATION: Check all configurations in parallel
+                    // const configurationPromises = initialConsignments.map((consignment) => {
+                    //     const hasAddressAndShipping = Boolean(
+                    //         consignment.shippingAddress && consignment.selectedShippingOption
+                    //     );
+
+                    //     // Get delivery date directly from physicalItems options
+                    //     const physicalItem = physicalItems.find(item => item.id.toString() === consignment.lineItemId.toString());
+                    //     const hasValidDeliveryDateValue = physicalItem?.options?.some((option: any) =>
+                    //         (option.name === "Delivery Date" || option.name.includes("Delivery Date")) &&
+                    //         option.value && option.value.trim() !== ''
+                    //     ) ?? true;
+
+                    //     return {
+                    //         lineItemId: consignment.lineItemId,
+                    //         isConfigured: hasAddressAndShipping && hasValidDeliveryDateValue
+                    //     };
+                    // });
+
+                    // const configurationResults = configurationPromises; // No need for Promise.all since it's synchronous now
+                    // configurationResults.forEach(result => {
+                    //     configuredItemsMap[result.lineItemId] = result.isConfigured;
+                    // });
+
+                    // setConfiguredItems(configuredItemsMap);
+
                     // Set up configured items map
                     const configuredItemsMap: { [key: string]: boolean } = {};
 
-                    // OPTIMIZATION: Check all configurations in parallel
-                    const configurationPromises = initialConsignments.map((consignment) => {
-                        const hasAddressAndShipping = Boolean(
-                            consignment.shippingAddress && consignment.selectedShippingOption
-                        );
+                    // Check all configurations properly
+                    const configurationResults = await Promise.all(
+                        initialConsignments.map(async (consignment) => {
+                            const hasAddressAndShipping = Boolean(
+                                consignment.shippingAddress && consignment.selectedShippingOption
+                            );
 
-                        // Get delivery date directly from physicalItems options
-                        const physicalItem = physicalItems.find(item => item.id.toString() === consignment.lineItemId.toString());
-                        const hasValidDeliveryDateValue = physicalItem?.options?.some((option: any) =>
-                            (option.name === "Delivery Date" || option.name.includes("Delivery Date")) &&
-                            option.value && option.value.trim() !== ''
-                        ) ?? true;
+                            // Check delivery date from localStorage instead of physicalItems options
+                            const hasValidDeliveryDate = checkDeliveryDateFromLocalStorage(consignment.lineItemId);
 
-                        return {
-                            lineItemId: consignment.lineItemId,
-                            isConfigured: hasAddressAndShipping && hasValidDeliveryDateValue
-                        };
-                    });
+                            return {
+                                lineItemId: consignment.lineItemId,
+                                isConfigured: hasAddressAndShipping && hasValidDeliveryDate
+                            };
+                        })
+                    );
 
-                    const configurationResults = configurationPromises; // No need for Promise.all since it's synchronous now
                     configurationResults.forEach(result => {
                         configuredItemsMap[result.lineItemId] = result.isConfigured;
                     });
@@ -801,8 +865,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             // Start by clearing selections
             setSelectedAddress(null);
             setSelectedShippingOption(null);
+            setSelectedDeliveryDate(null);
             setSelectedShippingDate(null); // Clear previous selected date
-            setAvailableShippingDates([]); // Clear available dates
+            //setAvailableShippingDates([]); // Clear available dates
 
             setIsLoading(true);
             try {
@@ -828,6 +893,30 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         setSelectedAddress(updatedConsignment.shippingAddress);
                         setSelectedShippingOption(updatedConsignment.selectedShippingOption);
 
+                        // Get shipping date (the date selected from calendar)
+                        const shipDate = await getItemShippingDate(currentItem.id);
+
+                        if (shipDate) {
+                            try {
+                                const dateParts = shipDate.split('/');
+                                if (dateParts.length === 3) {
+                                    const month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed
+                                    const day = parseInt(dateParts[1]);
+                                    const year = parseInt(dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]);
+
+                                    const deliveryDateObj = new Date(year, month, day);
+                                    deliveryDateObj.setHours(0, 0, 0, 0);
+
+                                    if (!isNaN(deliveryDateObj.getTime())) {
+                                        setSelectedShippingDate(deliveryDateObj);
+                                    }
+                                }
+                            } catch (error) {
+                                console.error('Error parsing delivery date:', error);
+                            }
+                        }
+
+                        // Get actual delivery date (MM/DD/YYYY format)
                         const deliveryDate = await getItemDeliveryDate(currentItem.id);
 
                         if (deliveryDate) {
@@ -838,26 +927,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                     const day = parseInt(dateParts[1]);
                                     const year = parseInt(dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]);
 
-                                    const dateObj = new Date(year, month, day);
+                                    const deliveryDateObj = new Date(year, month, day);
+                                    deliveryDateObj.setHours(0, 0, 0, 0);
 
-                                    if (!isNaN(dateObj.getTime()) && availableShippingDates.length > 0) {
-                                        const exactMatch = availableShippingDates.find(date =>
-                                            date.getFullYear() === dateObj.getFullYear() &&
-                                            date.getMonth() === dateObj.getMonth() &&
-                                            date.getDate() === dateObj.getDate()
-                                        );
-
-                                        if (exactMatch) {
-                                            setSelectedShippingDate(exactMatch);
-                                        } else {
-                                            // Fall back to closest date if no exact match
-                                            const closestDate = availableShippingDates.reduce((prev, curr) => {
-                                                return (Math.abs(curr.getTime() - dateObj.getTime()) <
-                                                    Math.abs(prev.getTime() - dateObj.getTime()))
-                                                    ? curr : prev;
-                                            });
-                                            setSelectedShippingDate(closestDate);
-                                        }
+                                    if (!isNaN(deliveryDateObj.getTime())) {
+                                        setSelectedDeliveryDate(deliveryDateObj);
                                     }
                                 }
                             } catch (error) {
@@ -1123,93 +1197,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
-    // Handle shipping option selection- currently not in use
-    const handleShippingOptionSelect = async (option: any) => {
-        setSelectedShippingOption(option);
-        setIsLoading(true);
 
-        try {
-            // Get current consignment from our local state
-            const currentConsignment = getCurrentConsignment();
-            const currentItem = getCurrentItem();
-
-            if (currentConsignment && currentConsignment.id) {
-                // Use direct API call to update shipping option
-                const result = await updateConsignmentShippingOption(currentConsignment.id, option.id);
-
-                // Fetch available dates
-                const dates = await fetchShippingDates(
-                    selectedAddress,
-                    currentItem.id,
-                    option.method || option.description
-                );
-
-                // Set the available dates in state
-                setAvailableShippingDates(dates);
-
-                // Reset selected date when shipping option changes
-                setSelectedShippingDate(null);
-
-                // Get updated consignments
-                const updatedConsignments = result.consignments || [];
-
-                // Find the updated consignment for our current item
-                const updatedConsignment = updatedConsignments.find((c: any) =>
-                    c.lineItemIds.some((lineItemId: string) =>
-                        lineItemId === getCurrentItem()?.id.toString() ||
-                        lineItemId === String(getCurrentItem()?.id)
-                    )
-                );
-                // Update our local item consignments with the updated data
-                if (updatedConsignment) {
-                    updateStoredConsignment(
-                        updatedConsignment.id,
-                        getCurrentItem().id,
-                        getCurrentItem().quantity,
-                        updatedConsignment.shippingAddress,
-                        option.id
-                    );
-                    const newItemConsignments = [...itemConsignments];
-                    const currentIndex = newItemConsignments.findIndex(c => c.lineItemId === getCurrentItem()?.id);
-
-                    if (currentIndex >= 0) {
-                        newItemConsignments[currentIndex] = {
-                            ...newItemConsignments[currentIndex],
-                            id: updatedConsignment.id,
-                            selectedShippingOption: updatedConsignment.selectedShippingOption,
-                        };
-
-                        setItemConsignments(newItemConsignments);
-                    }
-                }
-
-                // Synchronize the checkout state with the changes made via direct API
-                await refreshCheckoutTotals();
-            } else {
-                // Fallback update for local state if needed
-                const updatedConsignments = [...itemConsignments];
-                const currentIndex = updatedConsignments.findIndex(c => c.lineItemId === getCurrentItem()?.id);
-
-                if (currentIndex >= 0) {
-                    updatedConsignments[currentIndex] = {
-                        ...updatedConsignments[currentIndex],
-                        selectedShippingOption: option,
-                    };
-
-                    setItemConsignments(updatedConsignments);
-                }
-            }
-            await updateOrderSummaryDisplay();
-        } catch (err) {
-            if (err instanceof Error) {
-                setError(err.message);
-                setIsEditing(false);
-                onUnhandledError(err);
-            }
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     // Handle shipping address selection
     const handleAddressSelect = async (address: Address) => {
@@ -1224,12 +1212,12 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         // Reset shipping option and delivery date when address changes
         setSelectedShippingOption(null);
         setSelectedShippingDate(null);
-        setAvailableShippingDates([]);
+        setSelectedDeliveryDate(null);
+        // setAvailableShippingDates([]);
 
-        // console.log('address', address);
+        console.log('address', address);
         setSelectedAddress(address);
         setIsLoading(true);
-        setIsLoadingShippingOptions(true);
         try {
             // Create consignment to get shipping options
             const currentItem = getCurrentItem();
@@ -1301,7 +1289,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             }
         } finally {
             setIsLoading(false);
-            setIsLoadingShippingOptions(false);
         }
     };
 
@@ -1690,6 +1677,11 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         setIsAddAddressModalOpen(false);
     };
 
+    const handleEditGuestAddress = () => {
+        setIsEditingGuestAddress(true);
+        setIsAddAddressModalOpen(true);
+    };
+
     const handleSaveAddress = async (addressFormValues: AddressFormValues) => {
         try {
             // First convert form values to an address object
@@ -1707,21 +1699,34 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             if (checkout && checkout.customer && checkout.customer.id !== 0) {
                 // Only set shouldSaveAddress to true for logged-in customers
                 address.shouldSaveAddress = true;
-            } else {
-                // For guest customers, don't save the address
-                address.shouldSaveAddress = false;
-            }
-
-            // Create the customer address first using the service from useCheckout hook
-            if (createCustomerAddress && address.shouldSaveAddress) {
-                try {
-                    await createCustomerAddress(address);
-                } catch (error) {
-                    if (error instanceof Error) {
-                        setCreateCustomerAddressError(error);
+                if (createCustomerAddress) {
+                    try {
+                        await createCustomerAddress(address);
+                    } catch (error) {
+                        if (error instanceof Error) {
+                            setCreateCustomerAddressError(error);
+                        }
                     }
                 }
+            } else {
+                address.shouldSaveAddress = false;
+                const currentItem = getCurrentItem();
+
+                if (currentItem) {
+                    const storageKey = `guestAddress_${currentItem.id}`;
+                    localStorage.setItem(storageKey, JSON.stringify(address));
+
+                    // Update item-specific guest addresses state
+                    setItemGuestAddresses(prev => ({
+                        ...prev,
+                        [currentItem.id.toString()]: address
+                    }));
+                }
+
+                setIsEditingGuestAddress(false);
             }
+
+
 
             // Select the address for shipping after creating it
             await handleAddressSelect(address);
@@ -2060,105 +2065,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
-    const fetchShippingDates = async (
-        address: Address,
-        lineItemId: string | number,
-        shippingMethod: string
-    ) => {
-        try {
-            const checkout = getCheckout();
-            if (!checkout) {
-                throw new Error('Checkout not available');
-            }
-
-            const requestBody = {
-                cartId: checkout.id,
-                itemId: lineItemId.toString(),
-                quantity: 1,
-                shippingMethod: shippingMethod,
-                address: {
-                    country: address.countryCode,
-                    region: address.stateOrProvinceCode,
-                    city: address.city,
-                    zipcode: address.postalCode
-                }
-            };
-
-            const response = await fetch('https://bc-middleware-mm.onrender.com/get-dates', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify(requestBody)
-            });
-
-            if (!response.ok) {
-                throw new Error('Failed to fetch shipping dates');
-            }
-
-            const dateData: ShippingDateResponse = await response.json();
-
-            // First, check if there are method-specific dates
-            let matchedDates: { display: string; iso: string; value: number }[] = [];
-
-
-            if (dateData.methods) {
-                const methodMatch = dateData.methods.find(m =>
-                    shippingMethod.toLowerCase().includes(m.method.toLowerCase())
-                );
-
-                if (methodMatch) {
-                    matchedDates = methodMatch.availableDates;
-                }
-            }
-
-            // If no method-specific dates, fall back to general available dates
-            if (matchedDates.length === 0 && dateData.availableDates) {
-                matchedDates = dateData.availableDates;
-            }
-
-            // If still no dates, generate default dates
-            if (matchedDates.length === 0) {
-                const defaultDates = generateDefaultDates();
-                matchedDates = defaultDates.map(date => ({
-                    display: date.toLocaleDateString(),
-                    iso: date.toISOString().split('T')[0],
-                    value: date.getTime()
-                }));
-            }
-
-            // Return the matched dates without setting state
-            return matchedDates.map(dateObj => new Date(dateObj.value));
-        } catch (error) {
-            console.error('Error fetching shipping dates:', error);
-
-            // Fallback to default dates
-            const defaultDates = generateDefaultDates();
-            return defaultDates;
-        }
-    };
-
-    // Function to generate default dates if no specific dates are available
-    const generateDefaultDates = () => {
-        const today = new Date();
-        const startDate = new Date(today);
-        startDate.setDate(today.getDate() + 2); // Start from 2 days from now
-
-        const dates: Date[] = [];
-        const endDate = new Date(today);
-        endDate.setMonth(today.getMonth() + 1, 30); // 1.5 months from now
-
-        while (startDate <= endDate) {
-            // Exclude weekends if needed
-            if (startDate.getDay() !== 0 && startDate.getDay() !== 6) {
-                dates.push(new Date(startDate));
-            }
-            startDate.setDate(startDate.getDate() + 1);
-        }
-
-        return dates;
-    };
-
     const handleAddGiftMessage = async (lineItemId: string | number) => {
         setCurrentGiftMessageItemId(lineItemId);
         setEditedGiftMessage('');
@@ -2172,289 +2078,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         setEditedGiftMessage(safeMessage);
         setIsEditGiftMessageModalOpen(true);
     };
-    const handleDateSelection = async (date: Date) => {
-        setSelectedShippingDate(date);
-        setIsLoading(true);
-
-        try {
-            const checkout = getCheckout();
-            if (!checkout) {
-                throw new Error('Checkout not available');
-            }
-
-            const currentItem = getCurrentItem();
-            //    console.log('currentItem', currentItem)
-            if (!currentItem) {
-                throw new Error('No current item selected');
-            }
-
-            // Format date as mm/dd/yyyy
-            const formattedDate = date.toLocaleDateString('en-US', {
-                month: '2-digit',
-                day: '2-digit',
-                year: 'numeric'
-            });
-
-            // Step 1: Get the option ID for Delivery Date
-            const modifierResponse = await fetch('https://bc-middleware-mm.onrender.com/cart/get-modifier', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    cartId: checkout.id,
-                    itemId: currentItem.id.toString()
-                })
-            });
-
-            if (!modifierResponse.ok) {
-                throw new Error('Failed to get delivery date option ID');
-            }
-
-            const modifierData = await modifierResponse.json();
-            const deliveryDateOptionId = modifierData.id;
-
-            if (!deliveryDateOptionId) {
-                // If no option ID found, just set the date in state and return
-                console.log('No delivery date option ID found, skipping update');
-                return date;
-            }
-
-            const options = {
-                method: 'GET',
-                headers: {
-                    Accept: 'application/json',
-                    'Content-Type': 'application/json'
-                }
-            };
-
-            const cartResponse = await fetch('/api/storefront/carts?include=lineItems.physicalItems.options', options);
-
-            if (!cartResponse.ok) {
-                throw new Error('Failed to fetch cart data');
-            }
-
-            const cartData = await cartResponse.json();
-
-            const cartItem = cartData[0]?.lineItems.physicalItems.find(
-                (item: { id: any; }) => item.id === currentItem.id
-            );
-
-            if (!cartItem || !cartItem.options) {
-                throw new Error('Failed to retrieve item options');
-            }
-
-            // Build option selections array preserving all existing options
-            const optionSelections = cartItem.options.map((option: { nameId: any; value: any; valueId: any; }) => ({
-                optionId: option.nameId,
-                optionValue: option.valueId || option.value
-            }));
-
-            // Find and update or add the delivery date option
-            const deliveryDateIndex = optionSelections.findIndex(
-                (option: { optionId: any; }) => option.optionId === deliveryDateOptionId
-            );
-
-            if (deliveryDateIndex >= 0) {
-                // Update existing delivery date option
-                optionSelections[deliveryDateIndex].optionValue = formattedDate;
-            } else {
-                // Add delivery date option if it doesn't exist
-                optionSelections.push({
-                    optionId: deliveryDateOptionId,
-                    optionValue: formattedDate
-                });
-            }
-
-            // Step 2: Update the cart item with the delivery date
-            const updateOptions = {
-                method: 'PUT',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    lineItem: {
-                        productId: currentItem.productId,
-                        variantId: currentItem.variantId,
-                        quantity: currentItem.quantity,
-                        optionSelections: optionSelections
-                    }
-                })
-            };
-            //     console.log('updateOptions', updateOptions)
-            const updateResponse = await fetch(`/api/storefront/carts/${checkout.id}/items/${currentItem.id}`, updateOptions);
-
-            if (!updateResponse.ok) {
-                throw new Error('Failed to update delivery date');
-            }
-
-            // Step 3: Restore consignments similar to handleSubmitGiftMessage
-            // Fetch updated checkout to get consignments
-            const checkoutOptions = {
-                method: 'GET',
-                headers: {
-                    'Accept': 'application/json',
-                    'Content-Type': 'application/json'
-                }
-            };
-
-            const checkoutResponse = await fetch(
-                `/api/storefront/checkouts/${checkout.id}?include=consignments.availableShippingOptions`,
-                checkoutOptions
-            );
-
-            if (!checkoutResponse.ok) {
-                throw new Error('Failed to fetch updated checkout');
-            }
-
-            const result = await checkoutResponse.json();
-            const currentConsignments = result.consignments || [];
-
-            // Process consignments similar to splitLineItem logic
-            for (const item of itemConsignments) {
-
-                // Find the corresponding physical item to get its exact quantity
-                const physicalItem = physicalItems.find(
-                    physItem => physItem.id.toString() === item.lineItemId.toString()
-                );
-
-                // Get the quantity dynamically
-                const itemQuantity = physicalItem ? physicalItem.quantity : 1;
-
-                // Check if this item already has a consignment
-                const existingConsignment = currentConsignments.find((c: any) =>
-                    c.lineItemIds.length === 1 &&
-                    c.lineItemIds[0] === item.lineItemId.toString() &&
-                    c.lineItemIds.length === 1
-                );
-
-                // 1. Consignment exists but has no shipping option or address
-                if (
-                    (existingConsignment &&
-                        (!existingConsignment.selectedShippingOption ||
-                            !existingConsignment.shippingAddress ||
-                            Object.keys(existingConsignment.shippingAddress).length === 0)
-                    )
-                ) {
-                    const storedConsignment = findStoredConsignmentByLineItemId(
-                        item.lineItemId,
-                        itemQuantity
-                    );
-
-                    // If stored consignment exists, restore it
-                    if (storedConsignment?.selectedShippingOptionId) {
-                        try {
-                            await restoreConsignment(storedConsignment);
-                        } catch (restoreError) {
-                            console.error(`Error restoring consignment for item ${item.lineItemId}:`, restoreError);
-                        }
-                    }
-                }
-            }
-
-            // Merge consignments logic (similar to splitLineItem)
-            const mergeConsignments = (existingConsignments: ConsignmentWithItem[], newConsignments: any[]) => {
-                const consignmentMap = new Map<string | number, ConsignmentWithItem>();
-
-                // First, add existing consignments
-                existingConsignments.forEach(consignment => {
-                    if (!consignmentMap.has(consignment.lineItemId)) {
-                        consignmentMap.set(consignment.lineItemId, consignment);
-                    }
-                });
-
-                // Add or update with new consignments
-                newConsignments.forEach(newConsignment => {
-                    const lineItemId = newConsignment.lineItemIds[0];
-                    const existingConsignment = consignmentMap.get(lineItemId);
-
-                    const newConsignmentObj = {
-                        id: newConsignment.id,
-                        lineItemId,
-                        shippingAddress: newConsignment.shippingAddress,
-                        selectedShippingOption: newConsignment.selectedShippingOption,
-                        availableShippingOptions: newConsignment.availableShippingOptions || [],
-                    };
-
-                    // Prioritize consignments with complete shipping info
-                    if (!existingConsignment ||
-                        (newConsignmentObj.shippingAddress && newConsignmentObj.selectedShippingOption)) {
-                        consignmentMap.set(lineItemId, newConsignmentObj);
-                    }
-                });
-
-                return Array.from(consignmentMap.values());
-            };
-
-            // Update item consignments
-            setItemConsignments(prevConsignments =>
-                mergeConsignments(prevConsignments, currentConsignments)
-            );
-
-            // Update configured items state
-            const newConfiguredItems = { ...configuredItems };
-            itemConsignments.forEach((consignment: {
-                lineItemId: string | number;
-                shippingAddress?: any;
-                selectedShippingOption?: any;
-            }) => {
-                // Skip the current item being edited to keep it in editing state
-                if (consignment.lineItemId === currentItem.id) {
-                    return;
-                }
-
-                const isFullyConfigured =
-                    consignment.shippingAddress &&
-                    Object.keys(consignment.shippingAddress).length > 0 &&
-                    consignment.selectedShippingOption;
-
-                const hasDeliveryDate = hasValidOptionValue(consignment.lineItemId, "Delivery Date");
-                const isCompletelyConfigured = isFullyConfigured && hasDeliveryDate;
-
-                if (newConfiguredItems[consignment.lineItemId] !== isCompletelyConfigured) {
-                    newConfiguredItems[consignment.lineItemId] = isCompletelyConfigured;
-                }
-            });
-
-            setConfiguredItems(newConfiguredItems);
-
-            // Reload checkout to sync state
-            await loadCheckout();
-
-            // Refresh checkout totals
-            await refreshCheckoutTotals();
-
-            // Update configured items state based on delivery date
-            await fetchCartData();
-            return date;
-        } catch (error) {
-            console.error('Error updating delivery date:', error);
-            setError(error instanceof Error ? error.message : 'An unexpected error occurred');
-            return date;
-        } finally {
-            setIsLoading(false);
-        }
-    };
-
-    // Helper function to update the configured items state
-    // const updateConfiguredItemsState = () => {
-    //     const newConfiguredItems = { ...configuredItems };
-
-    //     itemConsignments.forEach(consignment => {
-    //         const hasAddressAndShipping =
-    //             consignment.shippingAddress &&
-    //             Object.keys(consignment.shippingAddress).length > 0 &&
-    //             consignment.selectedShippingOption;
-
-    //         const hasDeliveryDate = hasValidDeliveryDate(consignment.lineItemId);
-
-    //         newConfiguredItems[consignment.lineItemId] = hasAddressAndShipping && hasDeliveryDate;
-    //     });
-
-    //     setConfiguredItems(newConfiguredItems);
-    // };
-
 
 
     const getItemOptions = (itemId: string | Number, optionName: string) => {
@@ -2463,7 +2086,17 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         if (itemDetailsString) {
             try {
                 const itemDetails: any = JSON.parse(itemDetailsString);
-                const optionId = optionName === "Delivery Date" ? "deliveryDate" : "giftMessage";
+                let optionId = ''
+                if (optionName == "Delivery Date") {
+                    optionId = "deliveryDate"
+                }
+                else if (optionName == "Ship Date") {
+                    optionId = "dispatchDate"
+                }
+                else {
+                    optionId = "giftMessage"
+                }
+
 
                 optionValue = itemDetails[optionId];
             } catch (error) {
@@ -2575,7 +2208,8 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             setSelectedAddress(null);
             setSelectedShippingOption(null);
             setSelectedShippingDate(null);
-            setAvailableShippingDates([]);
+            setSelectedDeliveryDate(null);
+            // setAvailableShippingDates([]);
 
             if (relevantConsignment) {
                 // Update stored consignment
@@ -2619,6 +2253,27 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                             //calendar edits 
                             try {
                                 const deliveryDate = await getItemDeliveryDate(itemId);
+                                const shipDate = await getItemShippingDate(itemId);
+
+                                if (shipDate) {
+                                    try {
+                                        const dateParts = shipDate.split('/');
+                                        if (dateParts.length === 3) {
+                                            const month = parseInt(dateParts[0]) - 1; // JS months are 0-indexed
+                                            const day = parseInt(dateParts[1]);
+                                            const year = parseInt(dateParts[2].length === 2 ? `20${dateParts[2]}` : dateParts[2]);
+
+                                            const dateObj = new Date(year, month, day);
+
+                                            if (!isNaN(dateObj.getTime())) {
+                                                // Set the selected shipping date directly
+                                                setSelectedShippingDate(dateObj);
+                                            }
+                                        }
+                                    } catch (error) {
+                                        console.error('Error parsing delivery date:', error);
+                                    }
+                                }
 
                                 if (deliveryDate) {
                                     try {
@@ -2632,7 +2287,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                                             if (!isNaN(dateObj.getTime())) {
                                                 // Set the selected shipping date directly
-                                                setSelectedShippingDate(dateObj);
+                                                setSelectedDeliveryDate(dateObj);
                                             }
                                         }
                                     } catch (error) {
@@ -2667,44 +2322,6 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         }
     };
 
-    const fetchAndSetDates = async () => {
-        if (!selectedAddress || !selectedShippingOption || !getCurrentItem()) return;
-
-        const currentConsignment = getCurrentConsignment();
-        if (!currentConsignment) return;
-
-        // Safely access availableShippingOptions
-        if (!currentConsignment.availableShippingOptions ||
-            currentConsignment.availableShippingOptions.length === 0) {
-            setError("No shipping options available");
-            return;
-        }
-
-        // Find the full shipping option details
-        const fullShippingOption = currentConsignment.availableShippingOptions.find(
-            option => option.id === selectedShippingOption.id
-        );
-
-        if (!fullShippingOption) {
-            setError("Selected shipping option not found");
-            return;
-        }
-
-        setIsLoading(true);
-        try {
-            const dates = await fetchShippingDates(
-                selectedAddress,
-                getCurrentItem().id,
-                fullShippingOption.description
-            );
-            setAvailableShippingDates(dates);
-        } catch (error) {
-            console.error("Error fetching dates:", error);
-            setError("Failed to load delivery dates. Please try again.");
-        } finally {
-            setIsLoading(false);
-        }
-    };
 
     const handleDeliveryDateSubmit = async (shippingOption: any, deliveryDate: Date) => {
         setIsDeliveryDateModalOpen(false);
@@ -2714,6 +2331,13 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             // Set selections in state immediately
             setSelectedShippingOption(shippingOption);
             setSelectedShippingDate(deliveryDate);
+
+            if (shippingOption.deliveryDate) {
+                // Parse the deliveryDate from the option (MM/DD/YYYY format)
+                const [month, day, year] = shippingOption.deliveryDate.split('/');
+                const deliveryDateObj = new Date(parseInt(year), parseInt(month) - 1, parseInt(day));
+                setSelectedDeliveryDate(deliveryDateObj);
+            }
 
             const currentConsignment = getCurrentConsignment();
             const currentItem = getCurrentItem();
@@ -2826,183 +2450,120 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
         return <div>Loading...</div>;
     }
 
+    const handleDatePickerClick = () => {
+        const currentItem = getCurrentItem();
+        if (!currentItem) return;
 
-    const renderDatePickerInput = () => {
-        const formattedDate = selectedShippingDate
-            ? selectedShippingDate.toLocaleDateString('en-US', {
-                month: 'short',
-                day: 'numeric',
-                year: 'numeric'
-            })
-            : '';
-        const shippingDescription = (selectedShippingOption && selectedShippingOption.description) || '';
+        setIsDeliveryDateModalOpen(true);
+        // const storageKey = currentItem.id.toString();
+        // const localStorageData = localStorage.getItem(storageKey);
 
-        let inputPlaceholder = '';
-        if (shippingDescription && formattedDate) {
-            inputPlaceholder = shippingDescription + ' ' + formattedDate
+        // if (localStorageData) {
+        //     try {
+        //         const parsedData = JSON.parse(localStorageData);
+        //         if (parsedData.giftMessage !== undefined) {
+        //             setIsDeliveryDateModalOpen(true);
+        //         } else {
+        //             setError('Please add/skip the gift message by clicking the "Add Gift Message" button');
+        //         }
+        //     } catch (error) {
+        //         setError('Please add/skip the gift message by clicking the "Add Gift Message" button');
+        //     }
+        // } else {
+        //     setError('Please add/skip the gift message by clicking the "Add Gift Message" button');
+        // }
+    };
+
+
+
+
+    const renderAddressSelection = () => {
+        const checkout = getCheckout();
+        const isGuest = !checkout || !checkout.customer || checkout.customer.id === 0;
+
+        // For logged-in customers, show original address selection
+        if (!isGuest) {
+            return (
+                <div className="tt-custom-address-select-container">
+                    {customer.addresses.length > 0 ? (
+                        <AddressSelect
+                            addresses={customer.addresses}
+                            selectedAddress={selectedAddress}
+                            type={AddressType.Shipping}
+                            onSelectAddress={handleAddressSelect}
+                            onUseNewAddress={handleUseNewAddress}
+                            placeholderText={<TranslatedString id="shipping.choose_shipping_address" />}
+                            showSingleLineAddress
+                        />
+                    ) : (
+                        <Button
+                            onClick={handleUseNewAddress}
+                            testId="add-new-address"
+                            className="tt-add-button"
+                        >
+                            Add address
+                        </Button>
+                    )}
+                </div>
+            );
         }
-        else {
-            inputPlaceholder = 'Select a Estimated Delivery Date'
-        }
+        // For guest users, show saved address for current item or add button
+        const currentItemAddress = currentItem ? itemGuestAddresses[currentItem.id.toString()] : null;
 
         return (
-            <div className="form-field delivery-date-picker-field">
-                <label className="form-label">Estimated Delivery Date</label>
-                <div
-                    className="form-input date-picker-input"
-                    onClick={() => setIsDeliveryDateModalOpen(true)}
-                >
-                    <div className="date-picker-display">
-                        {inputPlaceholder}
+            <div className="tt-custom-address-select-container">
+                {currentItemAddress ? (
+                    <div className="tt-guest-address-display">
+                        <div
+                            className="tt-address-card"
+                            onClick={() => handleAddressSelect(currentItemAddress)}
+                        >
+                            <div className="tt-address-content">
+                                <div className="tt-address-name">
+                                    {currentItemAddress.firstName} {currentItemAddress.lastName}
+                                </div>
+                                <div className="tt-address-line">
+                                    {currentItemAddress.address1}
+                                    {currentItemAddress.address2 && `, ${currentItemAddress.address2}`}
+                                </div>
+                                <div className="tt-address-city-state">
+                                    {currentItemAddress.city}, {currentItemAddress.stateOrProvinceCode} {currentItemAddress.postalCode}
+                                </div>
+                            </div>
+
+                        </div>
+                        <button
+                            className="tt-edit-address-btn"
+                            onClick={(e) => {
+                                e.stopPropagation();
+                                handleEditGuestAddress();
+                            }}
+                            title="Edit address"
+                        >
+                            Edit
+                        </button>
                     </div>
-                    <span className="date-picker-icon">
-                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <rect x="3" y="4" width="18" height="18" rx="2" ry="2"></rect>
-                            <line x1="16" y1="2" x2="16" y2="6"></line>
-                            <line x1="8" y1="2" x2="8" y2="6"></line>
-                            <line x1="3" y1="10" x2="21" y2="10"></line>
-                        </svg>
-                    </span>
-                </div>
+                ) : (
+                    <Button
+                        onClick={() => {
+                            setIsEditingGuestAddress(false); // Make sure it's false for new address
+                            handleUseNewAddress();
+                        }}
+                        testId="add-new-address"
+                        className="tt-add-button"
+                    >
+                        Add address
+                    </Button>
+                )}
             </div>
         );
     };
 
-    const renderShippingAndDeliverySection = () => {
-        if (!selectedAddress) {
-            return null;
-        }
-
-        if (isLoadingShippingOptions) {
-            return null; // Don't display anything while loading shipping options
-        }
-
-        const currentConsignment = getCurrentConsignment();
-        const hasShippingOptions = currentConsignment &&
-            currentConsignment.availableShippingOptions &&
-            currentConsignment.availableShippingOptions.length > 0;
-        if (!hasShippingOptions) {
-            return (
-                <div className="tt-custom-no-shipping-options">
-                    Due to state restrictions, we cannot ship fruit to California or alcohol to Arizona, Indiana, Kentucky, Michigan, Mississippi, North Dakota, Tennessee or Utah
-                </div>
-            );
-        }
-        else {
-            return (<>{renderDatePickerInput()}</>)
-        }
-        // If we have selected a shipping option, show options and date picker
-        if (selectedShippingOption) {
-            return (
-                <div className="tt-custom-shipping-options">
-                    <h4 className="optimizedCheckout-headingSecondary">
-                        Shipping Method
-                    </h4>
-
-                    <div className="selected-shipping-option">
-                        <div className="option-description">{selectedShippingOption.description}</div>
-                        <div className="option-cost">${selectedShippingOption.cost.toFixed(2)}</div>
-                        <Button
-                            onClick={() => setIsDeliveryDateModalOpen(true)}
-                            variant={ButtonVariant.Secondary}
-                            className="edit-shipping-btn"
-                        >
-                            Change
-                        </Button>
-                    </div>
-
-                    {/* Date picker input */}
-                    {renderDatePickerInput()}
-                </div>
-            );
-        }
-        //Because we have dependancy we're keeping this function
-        else if (false) {
-            return (
-                <div className="tt-custom-shipping-options">
-                    <h4 className="optimizedCheckout-headingSecondary">
-                        Shipping Method
-                    </h4>
-
-                    {/* Original renderShippingOptions content */}
-                    {renderShippingOptions()}
-                </div>
-            );
-        }
-
+    const getCurrentItemGuestAddress = () => {
+        const currentItem = getCurrentItem();
+        return currentItem && isEditingGuestAddress ? itemGuestAddresses[currentItem.id.toString()] : undefined;
     };
 
-    const renderShippingOptions = () => {
-        const currentConsignment = getCurrentConsignment();
-
-        return (
-            <>
-                {selectedAddress && currentConsignment && currentConsignment.availableShippingOptions && currentConsignment.availableShippingOptions.length > 0 ? (
-                    <div className="tt-custom-shipping-options-list">
-                        {currentConsignment.availableShippingOptions.map(option => (
-                            <div
-                                key={option.id}
-                                className={`tt-custom-shipping-option ${selectedShippingOption?.id === option.id ? 'selected' : ''}`}
-                                onClick={() => handleShippingOptionSelect(option)}
-                            >
-                                <input
-                                    type="radio"
-                                    name="shippingOption"
-                                    id={`${getCurrentItem()?.id}-${option.id}`}
-                                    checked={selectedShippingOption?.id === option.id}
-                                    onChange={() => handleShippingOptionSelect(option)}
-                                />
-                                <label htmlFor={`${getCurrentItem()?.id}-${option.id}`}>
-                                    <div className="tt-custom-option-description">{option.description}</div>
-                                    <div className="tt-custom-option-cost">${option.cost.toFixed(2)}</div>
-                                    {option.transitTime && <div className="tt-custom-option-transit">{option.transitTime}</div>}
-                                </label>
-                            </div>
-                        ))}
-                    </div>
-                ) : (
-                    <div className="tt-custom-no-shipping-options">
-                        No shipping options available for this address
-                    </div>
-                )}
-
-                {/* Date Picker */}
-                {selectedShippingOption && (
-                    <div className="tt-custom-shipping-date-picker" style={{ marginTop: '1rem' }} >
-                        <h4 className="optimizedCheckout-headingSecondary" style={{ marginBottom: '0.5rem' }} >
-                            Select Delivery Date
-                        </h4>
-
-                        {availableShippingDates.length > 0 ? (
-                            <div className="tt-delivery-date-picker">
-                                <DatePicker
-                                    selected={selectedShippingDate}
-                                    onChange={(date: Date) => handleDateSelection(date)}
-                                    includeDates={availableShippingDates}
-                                    minDate={availableShippingDates[0]}
-                                    maxDate={availableShippingDates[availableShippingDates.length - 1]}
-                                    placeholderText="Select a delivery date"
-                                    className="tt-delivery-date-input"
-                                    calendarClassName="tt-delivery-date-calendar"
-                                    popperClassName="tt-delivery-date-popper"
-                                />
-                            </div>
-                        ) : (
-                            <div className="tt-loading-dates">
-                                <Button
-                                    onClick={() => fetchAndSetDates()}
-                                    variant={ButtonVariant.Secondary}
-                                    disabled={isLoading}
-                                >
-                                    Load Delivery Dates
-                                </Button>
-                            </div>
-                        )}
-                    </div>
-                )}
-            </>
-        );
-    };
 
     const renderItem = (item: LineItem, index: number) => {
         const isConfigured = configuredItems[item.id];
@@ -3014,8 +2575,9 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
             (!consignment || !consignment.id);
         const giftMessage = getItemOptions(item.id, "Gift Message")
         const hasGiftMessage = giftMessage && giftMessage != '_';
-        const showAddGiftMessageButton = !hasGiftMessage && !showSplitButton;
-        const currentConsignment = getCurrentConsignment();
+
+        // const showAddGiftMessageButton = !hasGiftMessage && !showSplitButton;
+        // const currentConsignment = getCurrentConsignment();
         return (
             <div
                 key={item.id}
@@ -3023,24 +2585,19 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
 
                 data-item-id={item.id}
             >
-                {/* Item Image and Basic Details - Always Visible */}
-                <div className="tt-custom-item-base-info">
-                    <div className="tt-custom-item-image-container">
-                        {item.imageUrl && (
-                            <img src={item.imageUrl} alt={item.name} className="tt-custom-item-image" />
-                        )}
-                    </div>
-                    <div className="tt-custom-item-details">
-                        <span className="tt-custom-item-name">{item.name}</span>
-                        <span className="tt-custom-item-quantity">Quantity: {item.quantity}</span>
-                    </div>
-                </div>
-
                 {/* Editing or Configured State */}
                 {isBeingEdited ? (
                     <div className="tt-custom-item-editing-container">
-                        {/* Address Selection */}
-                        <div className="tt-custom-address-selection">
+
+                        {/* Column 1: Item Details */}
+                        <div className="tt-custom-item-details-column">
+                            <div className="tt-editing-column-header">ITEM</div>
+                            {item.imageUrl && (
+                                <img src={item.imageUrl} alt={item.name} className="tt-editing-item-image" />
+                            )}
+                            <div className="tt-editing-item-name">{item.name}</div>
+                            <div className="tt-editing-item-sku">SKU: {item.sku}</div>
+                            <div className="tt-editing-item-qty">Quantity: {item.quantity}</div>
                             {showSplitButton && (
                                 <Button
                                     onClick={() => handleSplitLineItem(item.id, item.quantity)}
@@ -3051,75 +2608,99 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                                     Send to multiple recipients
                                 </Button>
                             )}
-                            {/* Show Add Gift Message Button in Edit Mode */}
-                            {showAddGiftMessageButton && (
-                                <Button
+                        </div>
+
+                        {/* Column 2: Address Selection */}
+                        <div className="tt-custom-address-selection">
+                            <div className="tt-editing-column-header">DELIVERY ADDRESS</div>
+                            {renderAddressSelection()}
+                        </div>
+
+                        {/* Column 3: Delivery Details */}
+                        <div className="tt-custom-shipping-options">
+                            <div className="tt-editing-column-header">SHIPPING METHOD</div>
+                            {selectedShippingOption && getItemOptions(item.id, "Delivery Date") ? (
+                                <div className="tt-delivery-details-content">
+                                    <div className="tt-delivery-method-name">
+                                        {(() => {
+                                            let methodName = selectedShippingOption.description
+                                                .split(' Delivers:')[0]
+                                                .split(' Est.')[0]
+                                                .trim();
+
+                                            // Add closing parenthesis if it's missing
+                                            if (methodName.includes('(') && !methodName.includes(')')) {
+                                                methodName += ')';
+                                            }
+
+                                            return methodName;
+                                        })()}
+                                    </div>
+                                    <div className="tt-delivery-cost">${selectedShippingOption.cost.toFixed(2)}</div>
+                                    <div className="tt-delivery-date-display">
+                                        Estimated Delivery: {getItemOptions(item.id, "Delivery Date")}
+                                    </div>
+                                    <div className="tt-delivery-date-display">
+                                        Ship Date: {getItemOptions(item.id, "Ship Date")}
+                                    </div>
+                                    <a
+                                        href="#"
+                                        className="tt-edit-ship-link"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            handleDatePickerClick();
+                                        }}
+                                    >
+                                        Edit
+                                    </a>
+                                </div>
+                            ) : selectedAddress ? (
+                                <button
+                                    className="tt-add-button"
+                                    onClick={handleDatePickerClick}
+                                >
+                                    Select Ship Date
+                                </button>
+                            ) : (
+                                <div className="tt-empty-message">Select address first</div>
+                            )}
+                        </div>
+
+                        {/* Column 4: Gift Message */}
+                        <div className={`tt-custom-gift-message-container ${hasGiftMessage ? 'has-message' : ''}`}>
+                            <div className="tt-editing-column-header">GIFT MESSAGE</div>
+                            {hasGiftMessage ? (
+                                <div className="tt-gift-message-content">
+                                    <div className="tt-gift-message-display">{giftMessage}</div>
+                                    <a
+                                        href="#"
+                                        className="tt-edit-link"
+                                        onClick={(e) => {
+                                            e.preventDefault();
+                                            handleEditGiftMessage(item.id, giftMessage || '');
+                                        }}
+                                    >
+                                        Edit
+                                    </a>
+                                </div>
+                            ) : getItemOptions(item.id, "Delivery Date") ? (
+                                <button
+                                    className="tt-add-button"
                                     onClick={() => handleAddGiftMessage(item.id)}
-                                    variant={ButtonVariant.Secondary}
-                                    className="tt-add-gift-message-button"
                                     disabled={isLoading}
                                 >
                                     Add Gift Message
-                                </Button>
+                                </button>
+                            ) : (
+                                <div className="tt-empty-message">Select delivery date first</div>
                             )}
-
-                            {/* Display Existing Gift Message in Edit Mode */}
-                            {hasGiftMessage && (
-                                <div className="tt-custom-gift-message-container">
-                                    <h4 className="tt-custom-gift-message-head">
-                                        Gift Message
-                                    </h4>
-                                    <div className="tt-custom-gift-message">
-                                        <div className="tt-custom-gift-message-text">{giftMessage}</div>
-                                        <a
-                                            href="#"
-                                            onClick={(e) => {
-                                                e.preventDefault();
-                                                handleEditGiftMessage(item.id, giftMessage || '');
-                                            }}
-                                            className="tt-edit-gift-message-link"
-                                        >
-                                            Edit
-                                        </a>
-                                    </div>
-                                </div>
-                            )}
-                            <h4 className="optimizedCheckout-headingSecondary">
-                                Shipping Address
-                            </h4>
-                            <div className="tt-custom-address-select-container">
-                                {customer.addresses.length > 0 ? (
-                                    <AddressSelect
-                                        addresses={customer.addresses}
-                                        selectedAddress={selectedAddress}
-                                        type={AddressType.Shipping}
-                                        onSelectAddress={handleAddressSelect}
-                                        onUseNewAddress={handleUseNewAddress}
-                                        placeholderText={<TranslatedString id="shipping.choose_shipping_address" />}
-                                        showSingleLineAddress
-                                    />
-                                ) : (
-                                    <Button
-                                        onClick={handleUseNewAddress}
-                                        testId="add-new-address"
-                                        variant={ButtonVariant.Secondary}
-                                        className="optimizedCheckout-buttonSecondary"
-                                    >
-                                        Add address
-                                    </Button>
-                                )}
-                            </div>
                         </div>
-
-                        {/* Shipping Options */}
-                        {selectedAddress && renderShippingAndDeliverySection()}
-
 
                         {/* Error Alert */}
                         {error && (
-                            <Alert>
-                                {error}
-                            </Alert>
+                            <div className="tt-error-alert">
+                                <Alert>{error}</Alert>
+                            </div>
                         )}
 
                         {/* Continue Button */}
@@ -3149,63 +2730,165 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     </div>
                 ) : isConfigured && consignment ? (
                     <div className="tt-custom-item-configured-container">
-                        <div className="tt-custom-item-address">
-                            {consignment?.shippingAddress && (
-                                <div>
-                                    <span className="tt-custom-address-name">
-                                        {consignment.shippingAddress.firstName} {consignment.shippingAddress.lastName}
-                                    </span>
-                                    <span className="tt-custom-address-line">
-                                        {consignment.shippingAddress.address1}
-                                    </span>
-                                    <span className="tt-custom-address-city-state">
-                                        {consignment.shippingAddress.city}, {consignment.shippingAddress.stateOrProvinceCode} {consignment.shippingAddress.postalCode}
-                                    </span>
-                                </div>
-                            )}
-                        </div>
-                        <div className="tt-custom-item-shipping-method">
-                            {consignment?.selectedShippingOption && (
-                                <span>
-                                    {consignment.selectedShippingOption.description} - ${consignment.selectedShippingOption.cost.toFixed(2)}
-                                </span>
-                            )}
-                        </div>
+                        <div className="tt-configured-item-content">
 
-                        {getItemOptions(item.id, "Delivery Date") && (
-                            <div className="tt-custom-item-delivery-date">
-                                <span className="tt-custom-delivery-date-label">Estimated Delivery Date:</span>
-                                <span className="tt-custom-delivery-date-value">{getItemOptions(item.id, "Delivery Date")}</span>
-                            </div>
-                        )}
-                        {/* Display Gift Message in Edit Mode if it exists */}
-                        {hasGiftMessage && (
-                            <div className="tt-custom-gift-message-container">
-                                <h4 className="tt-custom-gift-message-head">
-                                    Gift Message
-                                </h4>
-                                <div className="tt-custom-gift-message">
-                                    <div className="tt-custom-gift-message-text">{giftMessage}</div>
+                            {/* Column 1: Item Details */}
+                            <div className="tt-configured-item-column">
+                                <div className="tt-column-header">Item</div>
+                                <div className="tt-configured-item-header">
+                                    {item.imageUrl && (
+                                        <img src={item.imageUrl} alt={item.name} className="tt-configured-item-image" />
+                                    )}
+                                    <div className="tt-configured-item-name">{item.name}</div>
+                                     <div className="tt-configured-item-sku">SKU: {item.sku}</div>
+                                    <div className="tt-configured-item-qty">Quantity: {item.quantity}</div>
+                                    <button
+                                        className="tt-configured-edit-button"
+                                        onClick={() => handleEditConsignment(index)}
+                                        disabled={
+                                            isEditing &&
+                                            currentItemIndex !== index &&
+                                            !configuredItems[physicalItems[index].id]
+                                        }
+                                    >
+                                        Edit
+                                    </button>
                                 </div>
                             </div>
-                        )}
-                        <div className="tt-custom-item-actions">
-                            <Button
-                                onClick={() => handleEditConsignment(index)}
-                                variant={ButtonVariant.Secondary}
-                                className="optimizedCheckout-buttonSecondary"
-                                disabled={
-                                    isEditing &&
-                                    currentItemIndex !== index &&
-                                    !configuredItems[physicalItems[index].id]
-                                }
-                            >
-                                Edit
-                            </Button>
+
+                            {/* Column 2: Delivery Address */}
+                            <div className="tt-configured-item-column">
+                                <div className="tt-column-header">Delivery Address</div>
+                                {consignment?.shippingAddress && (
+                                    <div className="tt-configured-address-section">
+                                        <div className="tt-configured-address-line tt-configured-address-name">
+                                            {consignment.shippingAddress.firstName} {consignment.shippingAddress.lastName}
+                                        </div>
+                                        <div className="tt-configured-address-line">
+                                            {consignment.shippingAddress.address1}
+                                        </div>
+                                        {consignment.shippingAddress.address2 && (
+                                            <div className="tt-configured-address-line">
+                                                {consignment.shippingAddress.address2}
+                                            </div>
+                                        )}
+                                        <div className="tt-configured-address-line">
+                                            {consignment.shippingAddress.city}, {consignment.shippingAddress.stateOrProvinceCode}
+                                        </div>
+                                        <div className="tt-configured-address-line">
+                                            {consignment.shippingAddress.postalCode}
+                                        </div>
+                                        {consignment.shippingAddress.phone && (
+                                            <div className="tt-configured-address-line">
+                                                {consignment.shippingAddress.phone}
+                                            </div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
+
+                            {/* Column 3: Delivery Details */}
+                            <div className="tt-configured-item-column">
+                                <div className="tt-column-header">Shipping Method</div>
+                                <div className="tt-configured-delivery-section">
+                                    {consignment?.selectedShippingOption && (
+                                        <div className="tt-configured-shipping-method">
+                                            {(() => {
+                                                let methodName = consignment.selectedShippingOption.description
+                                                    .split(' Delivers:')[0]
+                                                    .split(' Est.')[0]
+                                                    .trim();
+
+                                                // Add closing parenthesis if it's missing
+                                                if (methodName.includes('(') && !methodName.includes(')')) {
+                                                    methodName += ')';
+                                                }
+
+                                                return methodName;
+                                            })()}
+                                        </div>
+                                    )}
+                                    {consignment?.selectedShippingOption && (
+                                        <div className="tt-configured-shipping-method">
+                                            ${consignment.selectedShippingOption.cost.toFixed(2)}
+                                        </div>
+                                    )}
+                                    {getItemOptions(item.id, "Delivery Date") && (
+                                        <div className="tt-configured-delivery-date">
+                                            <span className="tt-custom-delivery-date-label">Estimated Delivery:</span>
+                                            <span className="tt-custom-delivery-date-value">{getItemOptions(item.id, "Delivery Date")}</span>
+                                        </div>
+                                    )}
+                                    {getItemOptions(item.id, "Ship Date") && (
+                                        <div className="tt-configured-delivery-date">
+                                            <span className="tt-custom-delivery-date-label">Ship Date:</span>
+                                            <span className="tt-custom-delivery-date-value">{getItemOptions(item.id, "Ship Date")}</span>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+
+                            {/* Column 4: Gift Message */}
+                            <div className="tt-configured-item-column">
+                                <div className="tt-column-header">Gift Message</div>
+                                <div className="tt-configured-gift-section">
+                                    {hasGiftMessage ? (
+                                        <div className="tt-configured-gift-message-text">{giftMessage}</div>
+                                    ) : (
+                                        <div className="tt-configured-gift-message-text">No message</div>
+                                    )}
+                                </div>
+                            </div>
+
                         </div>
                     </div>
-                ) : null}
-            </div>
+                ) : (
+                    <div className="tt-custom-item-placeholder-container">
+                        <div className="tt-placeholder-item-content">
+
+                            {/* Column 1: Item Details */}
+                            <div className="tt-placeholder-item-column">
+                                <div className="tt-placeholder-column-header">ITEMS</div>
+                                <div className="tt-placeholder-item-details">
+                                    {item.imageUrl && (
+                                        <img src={item.imageUrl} alt={item.name} className="tt-placeholder-item-image" />
+                                    )}
+                                    <div className="tt-placeholder-item-name">{item.name}</div>
+                                    <div className="tt-placeholder-item-qty">SKU: {item.sku}</div>
+                                    <div className="tt-placeholder-item-qty">Quantity: {item.quantity}</div>
+                                    
+                                </div>
+                            </div>
+
+                            {/* Column 2: Delivery Address */}
+                            <div className="tt-placeholder-item-column">
+                                <div className="tt-placeholder-column-header">DELIVERY ADDRESS</div>
+                                <div className="tt-placeholder-empty-content">
+                                    <div className="tt-placeholder-text">Address not selected</div>
+                                </div>
+                            </div>
+
+                            {/* Column 3: Delivery Details */}
+                            <div className="tt-placeholder-item-column">
+                                <div className="tt-placeholder-column-header">SHIPPING</div>
+                                <div className="tt-placeholder-empty-content">
+                                    <div className="tt-placeholder-text">Shipping detaqils not selected</div>
+                                </div>
+                            </div>
+
+                            {/* Column 4: Gift Message */}
+                            <div className="tt-placeholder-item-column">
+                                <div className="tt-placeholder-column-header">GIFT MESSAGE</div>
+                                <div className="tt-placeholder-empty-content">
+                                    <div className="tt-placeholder-text">No gift message</div>
+                                </div>
+                            </div>
+
+                        </div>
+                    </div>
+                )
+                }
+            </div >
         );
     };
 
@@ -3218,7 +2901,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     <ErrorModal
                         error={createCustomerAddressError}
                         message={
-                            <>
+                            <>AddressFormModal
                                 <TranslatedString id="address.consignment_address_updated_text" />{' '}
                                 <TranslatedString id="customer.create_address_error" />
                             </>
@@ -3228,7 +2911,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                     />
 
                     <AddressFormModal
-                        countries={countries}
+                        countries={filteredCountries}
                         countriesWithAutocomplete={countriesWithAutocomplete || ['US', 'CA', 'AU', 'NZ', 'GB']}
                         defaultCountryCode={selectedAddress?.countryCode || customer?.addresses?.[0]?.countryCode}
                         getFields={getFields || (() => [])}
@@ -3239,6 +2922,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         onRequestClose={handleCloseAddAddressForm}
                         onSaveAddress={handleSaveAddress}
                         shouldShowSaveAddress={true}
+                        address={getCurrentItemGuestAddress()}
                     />
 
                     <GiftMessageModal
@@ -3259,6 +2943,7 @@ const CustomShipping: FunctionComponent<CustomShippingProps> = ({
                         product={currentItem}
                         selectedShippingOption={selectedShippingOption}
                         selectedShippingDate={selectedShippingDate}
+                        selectedDeliveryDate={selectedDeliveryDate}
                         onSubmit={handleDeliveryDateSubmit}
                         onRequestClose={() => setIsDeliveryDateModalOpen(false)}
                         isDatePickerMode={true} // Set this when opening from date picker

@@ -19,11 +19,11 @@
     @include grid-column($columns: 12);
 
     @include breakpoint("large") {
-        width: grid-calc(5, $total-columns);
+        width: grid-calc(4, $total-columns);
     }
 
     @include breakpoint("xlarge") {
-        width: grid-calc(4, $total-columns);
+        width: grid-calc(3, $total-columns);
     }
 
     &.is-sticky {
@@ -36,11 +36,11 @@
     @include grid-column(12);
 
     @include breakpoint("large") {
-        width: grid-calc(7, $total-columns);
+        width: grid-calc(8, $total-columns);
     }
 
     @include breakpoint("xlarge") {
-        width: grid-calc(8, $total-columns);
+        width: grid-calc(9, $total-columns);
     }
 
     @include breakpoint("xlarge") {

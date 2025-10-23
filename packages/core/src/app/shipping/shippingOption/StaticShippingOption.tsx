@@ -32,7 +32,7 @@ const StaticShippingOption: React.FunctionComponent<StaticShippingOptionProps> =
         return (
             <ShopperCurrency amount={method.cost} />
         )
-    
+
     }
 
     return (
@@ -47,7 +47,23 @@ const StaticShippingOption: React.FunctionComponent<StaticShippingOptionProps> =
                 </span>
             )}
             <span className="shippingOption-desc">
-                {method.description}
+                {method.description && (
+                    <div className="tt-configured-shipping-method">
+                        {(() => {
+                            let methodName = method.description
+                                .split(' Delivers:')[0]
+                                .split(' Est.')[0]
+                                .trim();
+
+                            // Add closing parenthesis if it's missing
+                            if (methodName.includes('(') && !methodName.includes(')')) {
+                                methodName += ')';
+                            }
+
+                            return methodName;
+                        })()}
+                    </div>
+                )}
                 {method.transitTime && (
                     <span className="shippingOption-transitTime">{method.transitTime}</span>
                 )}

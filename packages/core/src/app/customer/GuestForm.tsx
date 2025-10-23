@@ -81,7 +81,7 @@ const GuestForm: FunctionComponent<
             >
                 <div className="customerEmail-container">
                     <div className="customerEmail-body">
-                        <EmailField isFloatingLabelEnabled={isFloatingLabelEnabled} onChange={onChangeEmail}/>
+                        <EmailField label="Sign in as guest" isFloatingLabelEnabled={isFloatingLabelEnabled} onChange={onChangeEmail}/>
 
                         {shouldShowEmailWatermark && <PayPalFastlaneWatermark />}
 

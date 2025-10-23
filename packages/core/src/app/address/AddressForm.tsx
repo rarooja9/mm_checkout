@@ -90,12 +90,27 @@ class AddressForm extends Component<AddressFormProps & WithLanguageProps> {
             fieldName,
             countriesWithAutocomplete,
             countryCode,
+            countries,
             googleMapsApiKey,
             onAutocompleteToggle,
             shouldShowSaveAddress,
             isFloatingLabelEnabled,
         } = this.props;
 
+        const filteredFormFields = formFields.map(field => {
+            if (field.name === 'countryCode' && field.options?.items && countries && countries.length === 1) {
+                return {
+                    ...field,
+                    options: {
+                        ...field.options,
+                        items: field.options.items.filter((item: any) => item.value === countries[0].code)
+                    },
+                    default: countries[0].code
+                };
+            }
+            return field;
+        });
+       
         return (
             <>
                 <Fieldset>
@@ -103,7 +118,7 @@ class AddressForm extends Component<AddressFormProps & WithLanguageProps> {
                         className="checkout-address"
                         ref={this.containerRef as RefObject<HTMLDivElement>}
                     >
-                        {formFields.map((field) => {
+                        {filteredFormFields.map((field) => {
                             const addressFieldName = field.name;
                             const translatedPlaceholderId = PLACEHOLDER[addressFieldName];
 

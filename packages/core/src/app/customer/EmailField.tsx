@@ -8,9 +8,10 @@ import { FormField, TextInput } from '../ui/form';
 export interface EmailFieldProps {
     isFloatingLabelEnabled?: boolean;
     onChange?(value: string): void;
+    label?: string;
 }
 
-const EmailField: FunctionComponent<EmailFieldProps> = ({ onChange, isFloatingLabelEnabled }) => {
+const EmailField: FunctionComponent<EmailFieldProps> = ({ onChange, isFloatingLabelEnabled, label }) => {
     const renderInput = useCallback(
         (props: FieldProps) => (
             <TextInput
@@ -24,7 +25,10 @@ const EmailField: FunctionComponent<EmailFieldProps> = ({ onChange, isFloatingLa
         [isFloatingLabelEnabled],
     );
 
-    const labelContent = useMemo(() => <TranslatedString id="customer.email_label" />, []);
+    const labelContent = useMemo(
+        () => label || <TranslatedString id="customer.email_label" />,
+        [label]
+    );
 
     return (
         <FormField
@@ -36,5 +40,4 @@ const EmailField: FunctionComponent<EmailFieldProps> = ({ onChange, isFloatingLa
         />
     );
 };
-
 export default memo(EmailField);

@@ -1,5 +1,5 @@
 import React, { FunctionComponent, useEffect, useState } from 'react';
-import { Button, ButtonVariant } from '../ui/button';
+//import { Button, ButtonVariant } from '../ui/button';
 import { Modal } from '../ui/modal';
 import { LoadingOverlay } from '../ui/loading';
 import ShippingCalendarSelector from './CustomShippingCalendar';
@@ -11,6 +11,7 @@ interface DeliveryDateModalProps {
     product: any;
     selectedShippingOption: any;
     selectedShippingDate: Date | null;
+    selectedDeliveryDate: Date | null;
     isDatePickerMode?: boolean;
     onSubmit: (shippingOption: any, deliveryDate: Date) => void;
     onRequestClose: () => void;
@@ -23,19 +24,22 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
     product,
     selectedShippingOption: initialShippingOption,
     selectedShippingDate: initialShippingDate,
+    selectedDeliveryDate: initialDeliveryDate,
     onSubmit,
     onRequestClose,
 }) => {
     const [selectedOption, setSelectedOption] = useState(initialShippingOption);
     const [selectedDate, setSelectedDate] = useState(initialShippingDate);
+    const [selectedDelivery, setSelectedDelivery] = useState(initialDeliveryDate);
 
     // Update local state when props change
     useEffect(() => {
         if (isOpen) {
             setSelectedOption(initialShippingOption);
             setSelectedDate(initialShippingDate);
+            setSelectedDelivery(initialDeliveryDate);
         }
-    }, [isOpen, initialShippingOption, initialShippingDate]);
+    }, [isOpen, initialShippingOption, initialShippingDate, initialDeliveryDate]);
 
     const handleShippingOptionSelect = (option: any) => {
         setSelectedOption(option);
@@ -45,10 +49,20 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
         setSelectedDate(date);
     };
 
+    const handleActualDeliveryDateSelect = (date: Date) => {
+        setSelectedDelivery(date);
+    };
+
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         if (selectedOption && selectedDate) {
             onSubmit(selectedOption, selectedDate);
+        }
+    };
+
+    const handleAutoSubmit = (option: any, date: Date) => {
+        if (option && date) {
+            onSubmit(option, date);
         }
     };
 
@@ -57,8 +71,7 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
         e.stopPropagation();
     };
 
-    const isSubmitDisabled = !selectedOption || !selectedDate || isLoading;
-
+    // const isSubmitDisabled = !selectedOption || !selectedDate || isLoading;
     return (
         <Modal
             additionalModalClassName="modal--large"
@@ -71,17 +84,20 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
                 <div onClick={handleModalContentClick}>
                     <form onSubmit={handleSubmit}>
                         <div className="form-field">
-                                <ShippingCalendarSelector
-                                    currentConsignment={currentConsignment}
-                                    product={product}
-                                    onSelectShippingOption={handleShippingOptionSelect}
-                                    onSelectDeliveryDate={handleDeliveryDateSelect}
-                                    selectedShippingOption={selectedOption}
-                                    selectedShippingDate={selectedDate}
-                                    isLoading={isLoading}
-                                />
+                            <ShippingCalendarSelector
+                                currentConsignment={currentConsignment}
+                                product={product}
+                                onSelectShippingOption={handleShippingOptionSelect}
+                                onSelectDeliveryDate={handleDeliveryDateSelect}
+                                onSelectActualDeliveryDate={handleActualDeliveryDateSelect}
+                                selectedShippingOption={selectedOption}
+                                selectedShippingDate={selectedDate}
+                                selectedDeliveryDate={selectedDelivery}
+                                isLoading={isLoading}
+                                onAutoSubmit={handleAutoSubmit}
+                            />
                         </div>
-                        <div className="form-actions">
+                        {/* <div className="form-actions">
                             <Button
                                 onClick={(e) => {
                                     e.stopPropagation(); // Prevent event propagation
@@ -100,7 +116,7 @@ const DeliveryDateModal: FunctionComponent<DeliveryDateModalProps> = ({
                             >
                                 Confirm Selection
                             </Button>
-                        </div>
+                        </div> */}
                     </form>
                 </div>
             </LoadingOverlay>

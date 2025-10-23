@@ -33,3 +33,50 @@
         outline: none;
     }
 }
+
+
+
+.dropdown-menu-item--search {
+    padding: 0;
+    border-bottom: 1px solid #e5e5e5;
+    
+    .address-search-container {
+        padding: 8px 12px;
+        
+        .address-search-input {
+            width: 100%;
+            padding: 8px 12px;
+            border: 1px solid #d0d0d0;
+            border-radius: 4px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.2s ease;
+            
+            &:focus {
+                border-color: #007cba;
+                box-shadow: 0 0 0 2px rgba(0, 124, 186, 0.2);
+            }
+            
+            &::placeholder {
+                color: #999;
+                font-style: italic;
+            }
+        }
+    }
+}
+
+.dropdown-menu-item--no-results {
+    padding: 12px;
+    text-align: center;
+    
+    .no-results-text {
+        color: #666;
+        font-style: italic;
+        font-size: 14px;
+    }
+}
+
+/* Ensure search input doesn't trigger dropdown close */
+.dropdown-menu-item--search:hover {
+    background-color: transparent;
+}

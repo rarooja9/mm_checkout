@@ -8,6 +8,7 @@
 .customerEmail-container {
     @include grid-row;
 
+    max-width: 100%;
     @include breakpoint("small") {
         margin-bottom: spacing("single");
     }
@@ -248,4 +249,8 @@ $buttonWidthMap: (
     display: inline-block;
     flex-grow: 2;
     height: $container-border-global-size;
+}
+
+.form-actions-separator{
+    align-content: center;
 }
